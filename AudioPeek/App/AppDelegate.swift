@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let load = config?.injectedLoad {
             slip.setInjectedLoad(thermal: load.thermal, cpu: load.cpu, applyNow: false)
         }
+        if config?.overviewStall == true {
+            slip.setOverviewStall(true)
+        }
         store.onChange = { [weak self] in
             self?.applyChrome()
             self?.slip.applySettings()

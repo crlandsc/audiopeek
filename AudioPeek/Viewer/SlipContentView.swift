@@ -95,6 +95,7 @@ final class SlipContentView: NSView {
 
         waveformPane.setAccessibilityIdentifier("slip.waveform")
         spectrogramPane.setAccessibilityIdentifier("slip.spectrogram")
+        waveformPane.layerContentsRedrawPolicy = .onSetNeedsDisplay
         waveformPane.onClick = { [weak self] fraction in
             self?.onSeek("waveform", fraction)
         }
@@ -304,17 +305,106 @@ final class SlipContentView: NSView {
         spectrogramPlayhead.wantsLayer = true
         waveformPlayhead.layer?.backgroundColor = palette.head.cgColor
         spectrogramPlayhead.layer?.backgroundColor = palette.head.cgColor
+        waveformPane.needsDisplay = true
+    }
+
+    func setWaveform(snapshot: WaveformSnapshot, amplitude: WaveformAmplitude, color: WaveformColor) {
+        waveformPane.setWaveform(snapshot: snapshot, amplitude: amplitude, color: color)
+    }
+
+    func clearWaveform() {
+        waveformPane.clearWaveform()
     }
 
 }
 
 final class SlipPaneView: NSView {
     var onClick: ((Double) -> Void)?
+    private var lanes: [[WaveformColumn]] = []
+    private var columnCount = 0
+    private var amplitude = WaveformAmplitude.linear
+    private var waveformColor = WaveformColor.systemBlue
+
+    override var isFlipped: Bool { true }
+
+    func setWaveform(snapshot: WaveformSnapshot, amplitude: WaveformAmplitude, color: WaveformColor) {
+        lanes = snapshot.lanes
+        columnCount = snapshot.columnCount
+        self.amplitude = amplitude
+        waveformColor = color
+        needsDisplay = true
+    }
+
+    func clearWaveform() {
+        lanes = []
+        columnCount = 0
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard columnCount > 0, let lane = lanes.first, !lane.isEmpty else { return }
+        let color = resolvedColor()
+        let gap: CGFloat = lanes.count > 1 ? 3 : 0
+        let laneHeight = max(1, (bounds.height - gap * CGFloat(max(lanes.count - 1, 0))) / CGFloat(lanes.count))
+        let slot = bounds.width / CGFloat(columnCount)
+        for (index, lane) in lanes.enumerated() {
+            let count = min(lane.count, columnCount)
+            guard count > 0 else { continue }
+            let y0 = CGFloat(index) * (laneHeight + gap)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 0, y: yPosition(lane[0].maximum, y0: y0, height: laneHeight)))
+            for column in 0..<count {
+                path.line(to: NSPoint(x: slot * CGFloat(column), y: yPosition(lane[column].maximum, y0: y0, height: laneHeight)))
+            }
+            path.line(to: NSPoint(x: slot * CGFloat(count), y: yPosition(lane[count - 1].maximum, y0: y0, height: laneHeight)))
+            for column in stride(from: count - 1, through: 0, by: -1) {
+                path.line(to: NSPoint(x: slot * CGFloat(column), y: yPosition(lane[column].minimum, y0: y0, height: laneHeight)))
+            }
+            path.close()
+            color.withAlphaComponent(0.72).setFill()
+            path.fill()
+            color.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            if amplitude == .linear {
+                let mid = NSBezierPath()
+                let y = y0 + laneHeight / 2
+                mid.move(to: NSPoint(x: 0, y: y))
+                mid.line(to: NSPoint(x: bounds.width, y: y))
+                color.withAlphaComponent(0.22).setStroke()
+                mid.stroke()
+            }
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         guard bounds.width > 1 else { return }
         onClick?(Double(local.x / bounds.width))
+    }
+
+    private func yPosition(_ amplitudeValue: Float, y0: CGFloat, height: CGFloat) -> CGFloat {
+        let unit: CGFloat
+        switch amplitude {
+        case .linear:
+            let clamped = min(1, max(-1, amplitudeValue))
+            unit = CGFloat((clamped + 1) * 0.5)
+        case .decibels:
+            unit = CGFloat(WaveformColumns.decibelUnit(amplitudeValue))
+        }
+        return y0 + (1 - unit) * height
+    }
+
+    private func resolvedColor() -> NSColor {
+        if waveformColor.usesSystemBlue {
+            return .systemBlue
+        }
+        return NSColor(
+            srgbRed: waveformColor.red,
+            green: waveformColor.green,
+            blue: waveformColor.blue,
+            alpha: waveformColor.alpha
+        )
     }
 }
 

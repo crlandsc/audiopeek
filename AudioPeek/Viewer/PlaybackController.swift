@@ -81,9 +81,9 @@ final class PlaybackController {
         }
     }
 
-    func applyGate(allows: Bool) {
+    func applyGate(allows: Bool, pauseIfPlaying: Bool = true) {
         if !allows {
-            if isPlaying {
+            if pauseIfPlaying, isPlaying {
                 pauseEngine()
             }
             return

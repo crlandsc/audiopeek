@@ -14,6 +14,12 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private let content = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
     private let playback = PlaybackController()
     private let gate = MachineLoadGate()
+    private let overview = WaveformOverview()
+    private var overviewSnapshot = WaveformSnapshot.empty
+    private var appliedBlob = SettingsBlob.factory
+    private var activeOverview: OverviewKey?
+    private var activeColumns = 0
+    private var restartOverview: DispatchWorkItem?
     private var panel: SlipWindow?
     private var pollTimer: Timer?
     private var gateTimer: Timer?
@@ -55,6 +61,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.onSplit = { [weak self] fraction in
             self?.store.update { $0.splitFraction = fraction }
         }
+        overview.onSnapshot = { [weak self] snapshot in
+            self?.applyOverview(snapshot)
+        }
         applySettings()
     }
 
@@ -75,6 +84,27 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var playheadSeconds: TimeInterval { playback.position }
 
     var durationSeconds: TimeInterval { playback.duration }
+
+    var overviewFilled: Int { overviewSnapshot.filled }
+
+    var overviewColumnCount: Int { overviewSnapshot.columnCount }
+
+    var overviewLaneCount: Int { overviewSnapshot.lanes.count }
+
+    var overviewRunning: Bool { overviewSnapshot.running }
+
+    var overviewPaused: Bool { overviewSnapshot.paused }
+
+    var overviewFinished: Bool { overviewSnapshot.finished }
+
+    var overviewPassID: Int { overviewSnapshot.passID }
+
+    var overviewPeakPasses: Int { overviewSnapshot.peakPasses }
+
+    var overviewFirstMaximum: Double {
+        guard let column = overviewSnapshot.lanes.first?.first else { return 0 }
+        return Double(column.maximum)
+    }
 
     var canBecomeKey: Bool { panel?.canBecomeKey ?? false }
 
@@ -100,21 +130,45 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func applySettings() {
+        let previous = appliedBlob
+        let next = store.blob
         content.apply(
-            showWaveform: store.blob.showWaveform,
-            showSpectrogram: store.blob.showSpectrogram,
-            split: store.blob.splitFraction,
+            showWaveform: next.showWaveform,
+            showSpectrogram: next.showSpectrogram,
+            split: next.splitFraction,
             volume: store.effectiveVolume
         )
         playback.setGain(store.effectiveVolume)
-        guard let panel, let stored = store.blob.windowFrame else { return }
-        let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
-        if abs(panel.frame.origin.x - rect.origin.x) > 0.5
-            || abs(panel.frame.origin.y - rect.origin.y) > 0.5
-            || abs(panel.frame.width - rect.width) > 0.5
-            || abs(panel.frame.height - rect.height) > 0.5 {
-            panel.setFrame(rect, display: true)
+        if let panel, let stored = next.windowFrame {
+            let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
+            if abs(panel.frame.origin.x - rect.origin.x) > 0.5
+                || abs(panel.frame.origin.y - rect.origin.y) > 0.5
+                || abs(panel.frame.width - rect.width) > 0.5
+                || abs(panel.frame.height - rect.height) > 0.5 {
+                panel.setFrame(rect, display: true)
+            }
         }
+        content.layoutSubtreeIfNeeded()
+        content.setWaveform(
+            snapshot: overviewSnapshot,
+            amplitude: next.waveformAmplitude,
+            color: next.waveformColor
+        )
+        appliedBlob = next
+        refreshMetadata()
+        guard isVisible, currentURL != nil else { return }
+        let columns = waveformColumnCount()
+        if overviewInputsChanged(previous, next) || columns != activeColumns {
+            scheduleOverviewRestart()
+        }
+    }
+
+    func setOverviewStall(_ enabled: Bool) {
+        overview.setStallBetweenChunks(enabled)
+    }
+
+    func stepOverview() {
+        overview.step()
     }
 
     func hide() {
@@ -122,6 +176,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         inFlight = false
         stopPoll()
         stopPlayback()
+        cancelOverview()
         hotkey.setEscapeEnabled(false)
         panel?.orderOut(nil)
         onActivity()
@@ -239,20 +294,16 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func beginOpen(_ url: URL) {
         content.filenameLabel.stringValue = url.lastPathComponent
-        guard let info = playback.open(url: url) else {
+        guard playback.open(url: url) != nil else {
             hide()
             return
         }
-        content.metadataLabel.stringValue = AudioFileKind.metadataLine(
-            format: AudioFileKind.metadataLabel(for: url),
-            sampleRate: info.sampleRate,
-            channels: info.channels,
-            duration: info.duration
-        )
+        refreshMetadata()
         playback.setGain(store.effectiveVolume)
         onFileOpened()
         startGate()
         evaluateGate()
+        startOverviewNow()
     }
 
     private func togglePlay() {
@@ -265,7 +316,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         let sample = gate.sample()
         lastLoad = sample
         let allows = gate.allowsPlayback(sample)
-        playback.applyGate(allows: allows && isVisible)
+        overview.setWorkAllowed(allows)
+        let pausePlayback = !overview.isActive
+        playback.applyGate(allows: allows && isVisible, pauseIfPlaying: pausePlayback)
         syncPlayhead()
     }
 
@@ -424,5 +477,93 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     func windowDidEndLiveResize(_ notification: Notification) {
         scheduleFrameSave()
+        scheduleOverviewRestart()
     }
+
+    private func applyOverview(_ snapshot: WaveformSnapshot) {
+        overviewSnapshot = snapshot
+        content.setWaveform(
+            snapshot: snapshot,
+            amplitude: store.blob.waveformAmplitude,
+            color: store.blob.waveformColor
+        )
+        onActivity()
+    }
+
+    private func refreshMetadata() {
+        guard let info = playback.info, let url = currentURL else { return }
+        let showing = WaveformColumns.showing(
+            channels: info.channels,
+            dual: store.blob.waveformDual && store.blob.showWaveform
+        )
+        content.metadataLabel.stringValue = AudioFileKind.metadataLine(
+            format: AudioFileKind.metadataLabel(for: url),
+            sampleRate: info.sampleRate,
+            channels: info.channels,
+            duration: info.duration,
+            waveformShowing: showing
+        )
+    }
+
+    private func waveformColumnCount() -> Int {
+        content.layoutSubtreeIfNeeded()
+        return max(1, Int(content.waveformPane.bounds.width.rounded(.down)))
+    }
+
+    private func overviewInputsChanged(_ old: SettingsBlob, _ new: SettingsBlob) -> Bool {
+        old.showWaveform != new.showWaveform
+            || old.showSpectrogram != new.showSpectrogram
+            || old.waveformDual != new.waveformDual
+            || old.waveformAmplitude != new.waveformAmplitude
+            || old.spectrogram != new.spectrogram
+    }
+
+    private func scheduleOverviewRestart() {
+        guard isVisible, currentURL != nil else { return }
+        restartOverview?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.startOverviewNow()
+        }
+        restartOverview = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    private func startOverviewNow() {
+        restartOverview?.cancel()
+        guard isVisible, let url = currentURL, store.blob.showWaveform else {
+            cancelOverview()
+            return
+        }
+        let columns = waveformColumnCount()
+        let key = OverviewKey(
+            path: url.path,
+            columns: columns,
+            dual: store.blob.waveformDual,
+            amplitude: store.blob.waveformAmplitude,
+            showSpectrogram: store.blob.showSpectrogram,
+            spectrogram: store.blob.spectrogram
+        )
+        if key == activeOverview, overview.isActive { return }
+        activeOverview = key
+        activeColumns = columns
+        overview.start(url: url, columnCount: columns, dual: store.blob.waveformDual)
+    }
+
+    private func cancelOverview() {
+        restartOverview?.cancel()
+        activeOverview = nil
+        activeColumns = 0
+        overview.cancel()
+        overviewSnapshot = .empty
+        content.clearWaveform()
+    }
+}
+
+private struct OverviewKey: Equatable {
+    var path: String
+    var columns: Int
+    var dual: Bool
+    var amplitude: WaveformAmplitude
+    var showSpectrogram: Bool
+    var spectrogram: SpectrogramSettings
 }

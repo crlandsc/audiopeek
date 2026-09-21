@@ -28,7 +28,13 @@ enum AudioFileKind {
         }
     }
 
-    static func metadataLine(format: String, sampleRate: Double, channels: Int, duration: TimeInterval) -> String {
+    static func metadataLine(
+        format: String,
+        sampleRate: Double,
+        channels: Int,
+        duration: TimeInterval,
+        waveformShowing: Int? = nil
+    ) -> String {
         let khz = sampleRate / 1000
         let rate: String
         if abs(khz.rounded() - khz) < 0.05 {
@@ -38,6 +44,12 @@ enum AudioFileKind {
         }
         let whole = max(0, Int(duration.rounded(.down)))
         let clock = "\(whole / 60):" + String(format: "%02d", whole % 60)
-        return "\(format) · \(rate) · \(channels) ch · \(clock)"
+        let channelText: String
+        if let waveformShowing, waveformShowing < channels {
+            channelText = "\(channels) ch · showing \(waveformShowing)"
+        } else {
+            channelText = "\(channels) ch"
+        }
+        return "\(format) · \(rate) · \(channelText) · \(clock)"
     }
 }

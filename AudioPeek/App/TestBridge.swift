@@ -12,6 +12,7 @@ struct TestLaunchConfig {
     var injection: InjectedLoginRegistrar.Mode?
     var finderScript: ScriptedFinderSelection.Script?
     var injectedLoad: InjectedLoad?
+    var overviewStall: Bool
 
     func makeDefaults() -> UserDefaults {
         guard let defaults = UserDefaults(suiteName: defaultsSuite) else {
@@ -61,7 +62,8 @@ struct TestLaunchConfig {
             statePath: statePath,
             injection: injection,
             finderScript: finderScript(from: json["finderSelection"]),
-            injectedLoad: injectedLoad(from: json["machineLoad"])
+            injectedLoad: injectedLoad(from: json["machineLoad"]),
+            overviewStall: json["overviewStall"] as? Bool ?? false
         )
     }
 
@@ -194,6 +196,15 @@ final class TestBridge: NSObject {
             durationSeconds: slip.durationSeconds,
             loadThermal: thermalName(slip.lastLoad.thermal),
             loadCPU: slip.lastLoad.cpuBusy,
+            overviewFilled: slip.overviewFilled,
+            overviewColumnCount: slip.overviewColumnCount,
+            overviewLaneCount: slip.overviewLaneCount,
+            overviewRunning: slip.overviewRunning,
+            overviewPaused: slip.overviewPaused,
+            overviewFinished: slip.overviewFinished,
+            overviewPassID: slip.overviewPassID,
+            overviewPeakPasses: slip.overviewPeakPasses,
+            overviewFirstMaximum: slip.overviewFirstMaximum,
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -258,6 +269,11 @@ final class TestBridge: NSObject {
                 waveform: bool("waveform", in: userInfo) ?? true,
                 spectrogram: bool("spectrogram", in: userInfo) ?? true
             )
+        case "stepOverview":
+            slip.stepOverview()
+        case "setWaveformDual":
+            let dual = bool("dual", in: userInfo) ?? true
+            store.update { $0.waveformDual = dual }
         case "setSlipVolume":
             if let volume = number("volume", in: userInfo) {
                 store.setVolume(volume)
@@ -392,6 +408,15 @@ private struct TestState: Encodable {
     var durationSeconds: Double
     var loadThermal: String
     var loadCPU: Double?
+    var overviewFilled: Int
+    var overviewColumnCount: Int
+    var overviewLaneCount: Int
+    var overviewRunning: Bool
+    var overviewPaused: Bool
+    var overviewFinished: Bool
+    var overviewPassID: Int
+    var overviewPeakPasses: Int
+    var overviewFirstMaximum: Double
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double
