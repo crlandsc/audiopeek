@@ -7,6 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController!
     private var login: LoginItemController!
     private var settingsWindow: SettingsWindowController!
+    private var hotkeyCenter: HotkeyCenter!
+    private var slip: SlipPanelController!
+    private var scriptedFinder: ScriptedFinderSelection?
+    private var registeredCombo: HotkeyCombo?
+    private(set) var hotkeyFactoryFellBack = false
     private var testBridge: TestBridge?
 
     static func main() {
@@ -42,24 +47,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.login.reset()
             }
         )
+        let finderSource = makeFinderSource(config?.finderScript)
+        hotkeyCenter = HotkeyCenter()
+        hotkeyCenter.installHandler()
+        slip = SlipPanelController(
+            store: store,
+            finder: finderSource,
+            hotkey: hotkeyCenter,
+            onOpenSettings: { [weak self] in
+                self?.openSettings()
+            }
+        )
+        hotkeyCenter.onViewer = { [weak self] in
+            self?.slip.viewerHotkey()
+        }
+        hotkeyCenter.onEscape = { [weak self] in
+            self?.slip.escape()
+        }
         store.onChange = { [weak self] in
             self?.applyChrome()
+            self?.slip.applySettings()
+            self?.syncHotkey(allowFactoryFallback: false)
         }
         applyChrome()
         login.refreshFromSystem()
+        syncHotkey(allowFactoryFallback: true)
         if let config {
             let bridge = TestBridge(
                 store: store,
                 login: login,
                 status: statusItem,
                 settings: settingsWindow,
+                slip: slip,
+                hotkey: hotkeyCenter,
+                scriptedFinder: scriptedFinder,
+                app: self,
                 stateURL: URL(fileURLWithPath: config.statePath)
             )
             bridge.onOpenSettings = { [weak self] in
                 self?.openSettings()
             }
+            slip.onActivity = { [weak bridge] in
+                bridge?.writeState()
+            }
             bridge.start()
             testBridge = bridge
+        }
+    }
+
+    private func makeFinderSource(_ script: ScriptedFinderSelection.Script?) -> FinderSelectionSource {
+        guard let script else {
+            return SystemFinderSelection()
+        }
+        let scripted = ScriptedFinderSelection(script: script)
+        scriptedFinder = scripted
+        return scripted
+    }
+
+    private func syncHotkey(allowFactoryFallback: Bool) {
+        let desired = store.blob.hotkey
+        if desired == registeredCombo { return }
+        let status = hotkeyCenter.registerViewer(desired)
+        if status == noErr {
+            registeredCombo = desired
+            return
+        }
+        if allowFactoryFallback, desired == .optionSpace {
+            let fallback = HotkeyCombo.controlOptionSpace
+            if hotkeyCenter.registerViewer(fallback) == noErr {
+                hotkeyFactoryFellBack = true
+                registeredCombo = fallback
+                if store.blob.hotkey != fallback {
+                    store.setHotkey(fallback)
+                }
+                return
+            }
+        }
+        guard let registeredCombo, registeredCombo != desired else { return }
+        if hotkeyCenter.registerViewer(registeredCombo) == noErr, store.blob.hotkey != registeredCombo {
+            store.setHotkey(registeredCombo)
         }
     }
 

@@ -44,6 +44,13 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("login.registered")
                         }
+                        if !store.finderMessage.isEmpty {
+                            Text(store.finderMessage)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("finder.automationMessage")
+                        }
                         Toggle("Show menu bar icon", isOn: store.binding(\.showStatusItem))
                         Toggle("Show Dock icon", isOn: store.binding(\.showDockIcon))
                         HotkeyRecorder(combo: store.blob.hotkey) { combo in

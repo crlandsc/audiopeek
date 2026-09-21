@@ -6,6 +6,10 @@ struct HotkeyCombo: Codable, Equatable {
     var carbonModifiers: UInt32
 
     static let optionSpace = HotkeyCombo(keyCode: 49, carbonModifiers: optionKey)
+    static let controlOptionSpace = HotkeyCombo(
+        keyCode: 49,
+        carbonModifiers: controlKey | optionKey
+    )
 
     static let commandKey: UInt32 = 256
     static let shiftKey: UInt32 = 512

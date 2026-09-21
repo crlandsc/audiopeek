@@ -38,6 +38,7 @@ final class SettingsStore: ObservableObject {
     @Published private(set) var storedVolume: Double?
     @Published private(set) var loginPresentation: LoginPresentation
     @Published private(set) var lastLoginErrorCode: Int?
+    @Published private(set) var finderMessage = ""
 
     let defaults: UserDefaults
     var onChange: (() -> Void)?
@@ -104,6 +105,10 @@ final class SettingsStore: ObservableObject {
         defaults.set(clamped, forKey: Self.volumeKey)
     }
 
+    func setFinderMessage(_ message: String) {
+        finderMessage = message
+    }
+
     func setLoginPresentation(_ presentation: LoginPresentation, errorCode: Int?) {
         loginPresentation = presentation
         lastLoginErrorCode = errorCode
@@ -120,6 +125,7 @@ final class SettingsStore: ObservableObject {
         blob = next
         loginPresentation = .off
         lastLoginErrorCode = nil
+        finderMessage = ""
         persistBlob()
         onChange?()
         return wasEnabled

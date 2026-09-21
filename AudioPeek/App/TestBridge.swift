@@ -5,6 +5,7 @@ struct TestLaunchConfig {
     var defaultsSuite: String
     var statePath: String
     var injection: InjectedLoginRegistrar.Mode?
+    var finderScript: ScriptedFinderSelection.Script?
 
     func makeDefaults() -> UserDefaults {
         guard let defaults = UserDefaults(suiteName: defaultsSuite) else {
@@ -47,7 +48,35 @@ struct TestLaunchConfig {
             fputs("AudioPeek unknown login failure injection\n", stderr)
             exit(1)
         }
-        return TestLaunchConfig(defaultsSuite: suite, statePath: statePath, injection: injection)
+        return TestLaunchConfig(
+            defaultsSuite: suite,
+            statePath: statePath,
+            injection: injection,
+            finderScript: finderScript(from: json["finderSelection"])
+        )
+    }
+
+    private static func finderScript(from value: Any?) -> ScriptedFinderSelection.Script? {
+        if value == nil || value is NSNull {
+            return nil
+        }
+        if let mode = value as? String {
+            switch mode {
+            case "denied":
+                return .denied
+            case "failed":
+                return .failed
+            case "empty":
+                return .urls([])
+            default:
+                return .urls([URL(fileURLWithPath: mode)])
+            }
+        }
+        if let paths = value as? [String] {
+            return .urls(paths.map { URL(fileURLWithPath: $0) })
+        }
+        fputs("AudioPeek unknown finder selection injection\n", stderr)
+        exit(1)
     }
 }
 
@@ -57,6 +86,10 @@ final class TestBridge: NSObject {
     let login: LoginItemController
     let status: StatusItemController
     let settings: SettingsWindowController
+    let slip: SlipPanelController
+    let hotkey: HotkeyCenter
+    let scriptedFinder: ScriptedFinderSelection?
+    let app: AppDelegate
     let stateURL: URL
     var onOpenSettings: () -> Void = {}
     private var generation = 0
@@ -66,12 +99,20 @@ final class TestBridge: NSObject {
         login: LoginItemController,
         status: StatusItemController,
         settings: SettingsWindowController,
+        slip: SlipPanelController,
+        hotkey: HotkeyCenter,
+        scriptedFinder: ScriptedFinderSelection?,
+        app: AppDelegate,
         stateURL: URL
     ) {
         self.store = store
         self.login = login
         self.status = status
         self.settings = settings
+        self.slip = slip
+        self.hotkey = hotkey
+        self.scriptedFinder = scriptedFinder
+        self.app = app
         self.stateURL = stateURL
     }
 
@@ -116,7 +157,27 @@ final class TestBridge: NSObject {
             loginMessage: store.loginPresentation.message,
             loginButtonTitle: store.loginPresentation.buttonTitle,
             loginItemEnabled: store.blob.loginItemEnabled,
-            lastLoginErrorCode: store.lastLoginErrorCode
+            lastLoginErrorCode: store.lastLoginErrorCode,
+            finderMessage: store.finderMessage,
+            slipVisible: slip.isVisible,
+            slipFilename: slip.filename,
+            slipMetadata: slip.metadata,
+            headerOrder: slip.headerOrder,
+            finderPollScheduled: slip.pollScheduled,
+            finderRequestCount: slip.requestCount,
+            playbackRunning: slip.playbackRunning,
+            escapeHotkeyRegistered: hotkey.escapeRegistered,
+            viewerHotkeyStatus: Int(hotkey.viewerStatus),
+            carbonDeliveries: hotkey.carbonDeliveries,
+            panelCanBecomeKey: slip.canBecomeKey,
+            panelIsKey: slip.isKeyWindow,
+            hotkeyFactoryFellBack: app.hotkeyFactoryFellBack,
+            lastProbeStatus: Int(hotkey.lastProbeStatus),
+            playClicks: slip.playClicks,
+            slipFrameX: slip.frame.origin.x,
+            slipFrameY: slip.frame.origin.y,
+            slipFrameWidth: slip.frame.width,
+            slipFrameHeight: slip.frame.height
         )
         do {
             let encoder = JSONEncoder()
@@ -139,6 +200,35 @@ final class TestBridge: NSObject {
         case "snapshot":
             if let path = userInfo["path"] as? String {
                 _ = settings.writePNG(to: URL(fileURLWithPath: path))
+            }
+        case "snapshotSlip":
+            if let path = userInfo["path"] as? String {
+                _ = slip.writePNG(to: URL(fileURLWithPath: path))
+            }
+        case "pressViewerHotkey":
+            slip.viewerHotkey()
+        case "dispatchViewerHotkey":
+            hotkey.postViewerEvent()
+        case "dispatchEscape":
+            hotkey.postEscapeEvent()
+        case "probeHotkey":
+            let keyCode = UInt32(number("keyCode", in: userInfo) ?? 0)
+            let modifiers = UInt32(number("modifiers", in: userInfo) ?? 0)
+            _ = hotkey.probe(HotkeyCombo(keyCode: keyCode, carbonModifiers: modifiers))
+        case "setHotkey":
+            let keyCode = UInt32(number("keyCode", in: userInfo) ?? 0)
+            let modifiers = UInt32(number("modifiers", in: userInfo) ?? 0)
+            _ = store.setHotkey(HotkeyCombo(keyCode: keyCode, carbonModifiers: modifiers))
+        case "setFinder":
+            let mode = userInfo["mode"] as? String ?? "paths"
+            let paths = strings("paths", in: userInfo)
+            scriptedFinder?.set(mode: mode, paths: paths)
+        case "pressPlay":
+            slip.pressPlay()
+        case "setSlipVolume":
+            if let volume = number("volume", in: userInfo) {
+                store.setVolume(volume)
+                slip.applySettings()
             }
         case "hideStatusItem":
             store.update { $0.showStatusItem = false }
@@ -202,6 +292,14 @@ final class TestBridge: NSObject {
         return nil
     }
 
+    private func strings(_ key: String, in userInfo: [AnyHashable: Any]) -> [String] {
+        if let values = userInfo[key] as? [String] { return values }
+        if let values = userInfo[key] as? [Any] {
+            return values.compactMap { $0 as? String }
+        }
+        return []
+    }
+
     private func bool(_ key: String, in userInfo: [AnyHashable: Any]) -> Bool? {
         if let value = userInfo[key] as? Bool { return value }
         if let value = userInfo[key] as? NSNumber { return value.boolValue }
@@ -226,4 +324,24 @@ private struct TestState: Encodable {
     var loginButtonTitle: String
     var loginItemEnabled: Bool
     var lastLoginErrorCode: Int?
+    var finderMessage: String
+    var slipVisible: Bool
+    var slipFilename: String
+    var slipMetadata: String
+    var headerOrder: [String]
+    var finderPollScheduled: Bool
+    var finderRequestCount: Int
+    var playbackRunning: Bool
+    var escapeHotkeyRegistered: Bool
+    var viewerHotkeyStatus: Int
+    var carbonDeliveries: Int
+    var panelCanBecomeKey: Bool
+    var panelIsKey: Bool
+    var hotkeyFactoryFellBack: Bool
+    var lastProbeStatus: Int
+    var playClicks: Int
+    var slipFrameX: Double
+    var slipFrameY: Double
+    var slipFrameWidth: Double
+    var slipFrameHeight: Double
 }
