@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE: viewer overlay look</title>
+  <style>
+    :root {
+      --page-bg: #d8d8dc;
+      --page-ink: #1d1d1f;
+      --page-muted: #6e6e73;
+      --page-line: #c7c7cc;
+      --page-card: #f4f4f6;
+      --accent: #0a84ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-bg: #1c1c1e;
+        --page-ink: #f5f5f7;
+        --page-muted: #98989d;
+        --page-line: #3a3a3c;
+        --page-card: #2c2c2e;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      background: var(--page-bg);
+      color: var(--page-ink);
+    }
+    .page { max-width: 1080px; margin: 0 auto; padding: 20px 20px 48px; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.02em; }
+    .lede { color: var(--page-muted); margin: 0 0 16px; max-width: 62em; }
+    .controls, .state {
+      background: var(--page-card);
+      border: 1px solid var(--page-line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 6px 0; }
+    .row label { color: var(--page-muted); min-width: 84px; font-size: 12px; }
+    .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+    .seg button, .bundles button {
+      appearance: none;
+      border: 1px solid var(--page-line);
+      background: transparent;
+      color: var(--page-ink);
+      border-radius: 7px;
+      padding: 4px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .seg button[aria-pressed="true"], .bundles button[aria-pressed="true"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .bundles { display: flex; flex-wrap: wrap; gap: 6px; }
+    .hint { font-size: 12px; color: var(--page-muted); margin: 0 0 10px; }
+    pre.state-out {
+      margin: 8px 0 0;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+    }
+
+    /* Fake Finder desktop */
+    .stage {
+      position: relative;
+      height: 680px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--page-line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.18), transparent 40%),
+        #5a6a78;
+    }
+    @media (prefers-color-scheme: dark) {
+      .stage { background: #2a3138; }
+    }
+    .finder-win {
+      position: absolute;
+      inset: 36px 48px auto 48px;
+      height: 220px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(0,0,0,0.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      .finder-win { background: rgba(40,40,42,0.7); }
+    }
+    .finder-title {
+      height: 22px;
+      border-radius: 8px 8px 0 0;
+      background: rgba(255,255,255,0.35);
+      color: rgba(0,0,0,0.45);
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .finder-title { color: rgba(255,255,255,0.4); background: rgba(0,0,0,0.2); }
+    }
+    .finder-files { padding: 16px 20px; color: rgba(0,0,0,0.4); font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .finder-files { color: rgba(255,255,255,0.35); }
+    }
+
+    .overlay {
+      position: absolute;
+      left: 50%;
+      top: 86px;
+      transform: translateX(-50%);
+      width: min(860px, calc(100% - 48px));
+      height: 500px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .overlay.chrome-slip {
+      border-radius: 10px;
+      background: var(--ov-bg);
+      color: var(--ov-ink);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+      border: 1px solid var(--ov-line);
+    }
+    .overlay.chrome-card {
+      border-radius: 14px;
+      background: var(--ov-bg);
+      color: var(--ov-ink);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+      border: 1px solid var(--ov-line);
+    }
+    .overlay.chrome-scope {
+      border-radius: 2px;
+      background: var(--ov-bg);
+      color: var(--ov-ink);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      border: 1px solid var(--ov-line);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .overlay {
+      --ov-bg: #f3f3f5;
+      --ov-ink: #1d1d1f;
+      --ov-muted: #6e6e73;
+      --ov-line: #d5d5da;
+      --ov-pane: #f7f7f8;
+      --ov-wave: #007aff;
+      --head: #ff3b30;
+    }
+    .overlay.chrome-scope { --ov-bg: #ecece8; --ov-pane: #e4e4de; --head: #1d1d1f; }
+    .overlay.chrome-card { --head: #0a84ff; }
+    @media (prefers-color-scheme: dark) {
+      .overlay {
+        --ov-bg: #2a2a2c;
+        --ov-ink: #f5f5f7;
+        --ov-muted: #98989d;
+        --ov-line: #3d3d40;
+        --ov-pane: #121214;
+        --ov-wave: #0a84ff;
+        --head: #ff453a;
+      }
+      .overlay.chrome-scope { --ov-bg: #161618; --ov-pane: #0e0e10; --head: #f2f2f2; }
+      .overlay.chrome-card { --head: #64d2ff; }
+    }
+
+    .hdr { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--ov-line); flex: 0 0 auto; }
+    .chrome-slip .hdr { height: 34px; }
+    .chrome-card .hdr {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "fname gear" "badges badges";
+      height: auto;
+      padding: 10px 12px 8px;
+      align-items: center;
+    }
+    .chrome-card .fname { grid-area: fname; width: auto; }
+    .chrome-card .gear { grid-area: gear; }
+    .chrome-card .badges { grid-area: badges; }
+    .chrome-scope .hdr {
+      height: 26px;
+      font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.01em;
+    }
+    .fname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .chrome-slip .fname { font-size: 12px; flex: 1 1 0; }
+    .chrome-card .fname { font-size: 15px; width: 100%; }
+    .chrome-scope .fname { font-weight: 500; flex: 1 1 auto; }
+    .meta { color: var(--ov-muted); white-space: nowrap; }
+    .chrome-slip .meta { font-size: 11px; }
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
+    .badge {
+      font-size: 11px;
+      color: var(--ov-muted);
+      border: 1px solid var(--ov-line);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+    .icon-btn {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--ov-ink);
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      cursor: pointer;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+    }
+    .icon-btn:hover { background: color-mix(in srgb, var(--ov-ink) 8%, transparent); }
+    .icon-btn svg { width: 14px; height: 14px; fill: currentColor; }
+    .gear { color: var(--ov-muted); }
+    .vol {
+      width: 72px;
+      accent-color: var(--head);
+    }
+    .chrome-scope .vol { width: 56px; }
+    .transport {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--ov-line);
+      flex: 0 0 auto;
+    }
+    .time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ov-muted); }
+    .chrome-scope .transport {
+      font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 3px 8px;
+    }
+    .hidden { display: none !important; }
+
+    .panes { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+    .pane { position: relative; min-height: 48px; background: var(--ov-pane); }
+    .wave-pane { flex: 0 0 var(--split, 50%); }
+    .spec-pane { flex: 1 1 auto; }
+    .split {
+      flex: 0 0 7px;
+      cursor: row-resize;
+      position: relative;
+      background: var(--ov-bg);
+    }
+    .split::after {
+      content: "";
+      position: absolute;
+      left: 18%;
+      right: 18%;
+      top: 2px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--ov-line);
+    }
+    canvas.wave { width: 100%; height: 100%; display: block; }
+    .spec-img {
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      display: block;
+      image-rendering: auto;
+    }
+    .lane-label, .spec-label {
+      position: absolute;
+      left: 8px;
+      top: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ov-ink);
+      opacity: 0.45;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .lane-label.r { top: auto; bottom: 4px; }
+    .spec-label.right { left: auto; right: 8px; }
+    .playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .playhead .line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 1px;
+      background: var(--head);
+    }
+    .cursor-handle .line { width: 2px; }
+    .cursor-dot .line { width: 1px; opacity: 0.55; }
+    .handle {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translate(-50%, 0);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid var(--head);
+    }
+    .cursor-handle .handle { display: block; }
+    .dot {
+      display: none;
+      position: absolute;
+      top: 22%;
+      left: 50%;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--head);
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 0 2px var(--ov-pane);
+    }
+    .cursor-dot .dot { display: block; }
+    .toast {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      background: var(--ov-bg);
+      border: 1px solid var(--ov-line);
+      color: var(--ov-ink);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms linear;
+      z-index: 5;
+    }
+    .toast.show { opacity: 1; }
+    .safe { color: var(--page-muted); font-size: 12px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>PROTOTYPE: which look should the version 1 viewer overlay take?</h1>
+    <p class="lede">
+      Layout is already locked: waveform above spectrogram, 50/50 draggable split, compact header, both panes on,
+      stereo waveform lanes, spectrogram mixdown. This page only asks about colormap, header/transport chrome, and cursor.
+      Mix and match. Play, seek, and volume are visual only. The source file is not loaded into the page and nothing is played.
+      Light and dark follow the OS appearance. There is no theme toggle. The waveform default is system blue and can be overridden.
+    </p>
+
+    <div class="controls">
+      <p class="hint">Bundles are starting points. Change any axis after.</p>
+      <div class="row">
+        <label>Bundle</label>
+        <div class="bundles" id="bundles">
+          <button type="button" data-bundle="slip" aria-pressed="true">A Slip + magma + hairline</button>
+          <button type="button" data-bundle="card">B Card + viridis + handle</button>
+          <button type="button" data-bundle="scope">C Scope + grey + dot</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Chrome</label>
+        <div class="seg" id="chrome-seg">
+          <button type="button" data-chrome="slip" aria-pressed="true">Slip</button>
+          <button type="button" data-chrome="card">Card</button>
+          <button type="button" data-chrome="scope">Scope</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Colormap</label>
+        <div class="seg" id="cmap-seg">
+          <button type="button" data-cmap="magma" aria-pressed="true">Magma</button>
+          <button type="button" data-cmap="viridis">Viridis</button>
+          <button type="button" data-cmap="grey">Grey</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Cursor</label>
+        <div class="seg" id="cursor-seg">
+          <button type="button" data-cursor="hairline" aria-pressed="true">Hairline</button>
+          <button type="button" data-cursor="handle">Handle</button>
+          <button type="button" data-cursor="dot">Dot</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Waveform</label>
+        <div class="seg">
+          <input id="wave-color" type="color" value="#007aff" aria-label="Waveform color">
+          <button type="button" id="wave-reset">Reset to system blue</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="finder-win">
+        <div class="finder-title">Music</div>
+        <div class="finder-files">SLOW DANCING IN THE DARK_15s.wav &nbsp; selected</div>
+      </div>
+
+      <div class="overlay chrome-slip cursor-hairline" id="overlay">
+        <header class="hdr" id="hdr"></header>
+        <div class="transport hidden" id="transport"></div>
+        <div class="panes">
+          <div class="pane wave-pane" id="wave-pane">
+            <div class="lane-label" id="lane-l"></div>
+            <div class="lane-label r" id="lane-r"></div>
+            <canvas class="wave" id="wave"></canvas>
+            <div class="playhead cursor-hairline" id="ph-wave"><div class="line"></div><div class="handle"></div><div class="dot"></div></div>
+          </div>
+          <div class="split" id="split" title="Drag to resize"></div>
+          <div class="pane spec-pane" id="spec-pane">
+            <div class="spec-label" id="spec-label"></div>
+            <div class="spec-label right" id="spec-right"></div>
+            <img class="spec-img" id="spec" alt="Mel spectrogram of the named 15s WAV, mixdown">
+            <div class="playhead cursor-hairline" id="ph-spec"><div class="line"></div><div class="handle"></div><div class="dot"></div></div>
+          </div>
+        </div>
+        <div class="toast" id="toast">Would open the settings window</div>
+      </div>
+    </div>
+
+    <p class="safe">Safety: no &lt;audio&gt; element, no decode in the browser, no playback. Pictures were computed offline from the WAV as data.</p>
+
+    <div class="state">
+      <div class="hint">State after the last action</div>
+      <pre class="state-out" id="state"></pre>
+    </div>
+  </div>
+
+  <script src="viewer-look-data.js"></script>
+  <script>
+    const playSvg = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.6v10.8L12.2 7z"/></svg>';
+    const pauseSvg = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 2h3v10H3zM8 2h3v10H8z"/></svg>';
+    const gearSvg = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M5.6 1.2h2.8l.3 1.4a4.6 4.6 0 0 1 1.2.7l1.4-.5 1.4 2.4-1.1 1c.1.3.1.6.1.9s0 .6-.1.9l1.1 1-1.4 2.4-1.4-.5a4.6 4.6 0 0 1-1.2.7l-.3 1.4H5.6l-.3-1.4a4.6 4.6 0 0 1-1.2-.7l-1.4.5L1.3 8.9l1.1-1A4 4 0 0 1 2.3 7c0-.3 0-.6.1-.9l-1.1-1 1.4-2.4 1.4.5a4.6 4.6 0 0 1 1.2-.7l.3-1.4zM7 8.4A1.4 1.4 0 1 0 7 5.6a1.4 1.4 0 0 0 0 2.8z"/></svg>';
+
+    const systemBlue = () => matchMedia("(prefers-color-scheme: dark)").matches ? "#0a84ff" : "#007aff";
+    const osTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+    const state = {
+      theme: osTheme(),
+      chrome: "slip",
+      cmap: "magma",
+      cursor: "hairline",
+      waveColor: "system",
+      t: 4.8,
+      playing: false,
+      volume: 1,
+      split: 0.5,
+      lastAction: "load"
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const overlay = $("overlay");
+    const wave = $("wave");
+    const spec = $("spec");
+    let raf = 0;
+    let lastTs = 0;
+
+    function fmt(t) {
+      const m = Math.floor(t / 60);
+      const s = (t % 60);
+      return m + ":" + s.toFixed(2).padStart(5, "0");
+    }
+    function fmtShort(t) {
+      const m = Math.floor(t / 60);
+      const s = Math.floor(t % 60);
+      return m + ":" + String(s).padStart(2, "0");
+    }
+
+    function press(group, attr, value) {
+      group.querySelectorAll("button").forEach((b) => {
+        b.setAttribute("aria-pressed", String(b.getAttribute(attr) === value));
+      });
+    }
+
+    function metaLine() {
+      const p = window.PROTO;
+      return p.format + " · " + (p.sr / 1000) + " kHz · " + p.channels + " ch · " + fmtShort(p.duration);
+    }
+
+    function renderChrome() {
+      const p = window.PROTO;
+      const hdr = $("hdr");
+      const transport = $("transport");
+      const play = '<button class="icon-btn" id="play" type="button" aria-label="Play or pause">' + (state.playing ? pauseSvg : playSvg) + "</button>";
+      const gear = '<button class="icon-btn gear" id="gear" type="button" aria-label="Open settings">' + gearSvg + "</button>";
+      const vol = '<input class="vol" id="vol" type="range" min="0" max="1" step="0.01" value="' + state.volume + '" aria-label="Volume">';
+
+      overlay.classList.remove("chrome-slip", "chrome-card", "chrome-scope");
+      overlay.classList.add("chrome-" + state.chrome);
+      $("lane-l").textContent = state.chrome === "slip" ? "" : "L";
+      $("lane-r").textContent = state.chrome === "slip" ? "" : "R";
+      $("spec-label").textContent = state.chrome === "scope"
+        ? "MEL 128  n_fft 2048  hop 512  Hann  dB " + p.analysis.dbFloor + "/" + p.analysis.dbRange
+        : (state.chrome === "card" ? "Spectrogram · mixdown" : "");
+      $("spec-right").textContent = state.chrome === "scope" ? "0–" + p.analysis.fmax + " Hz (mel)" : "";
+
+      if (state.chrome === "slip") {
+        hdr.innerHTML = play + '<div class="fname" title="' + p.file + '">' + p.file + "</div>" +
+          '<div class="meta">' + metaLine() + "</div>" + vol + gear;
+        transport.classList.add("hidden");
+        transport.innerHTML = "";
+      } else if (state.chrome === "card") {
+        hdr.innerHTML = '<div class="fname">' + p.file + "</div>" + gear +
+          '<div class="badges">' +
+          '<span class="badge">' + p.format + "</span>" +
+          '<span class="badge">' + p.sr + " Hz</span>" +
+          '<span class="badge">' + p.channels + " ch</span>" +
+          '<span class="badge">' + fmtShort(p.duration) + "</span>" +
+          "</div>";
+        transport.classList.remove("hidden");
+        transport.innerHTML = play + '<div class="time" id="clock">' + fmt(state.t) + " / " + fmt(p.duration) + "</div>" +
+          '<span style="flex:1"></span>' + vol;
+      } else {
+        hdr.innerHTML = '<div class="fname">FILE=' + p.file + "</div>" +
+          '<div class="meta">SR=' + p.sr + " CH=" + p.channels + " FMT=" + p.format + " DUR=" + p.duration.toFixed(3) + "</div>" +
+          gear;
+        transport.classList.remove("hidden");
+        transport.innerHTML = play + '<div class="time" id="clock">' + fmt(state.t) + " / " + fmt(p.duration) + "</div>" +
+          '<span style="flex:1"></span><span class="time">VOL</span>' + vol;
+      }
+      bindChromeButtons();
+    }
+
+    function bindChromeButtons() {
+      const play = $("play");
+      const gear = $("gear");
+      const vol = $("vol");
+      if (play) play.onclick = () => {
+        state.playing = !state.playing;
+        state.lastAction = state.playing ? "play (visual only)" : "pause";
+        lastTs = 0;
+        renderChrome();
+        dump();
+      };
+      if (gear) gear.onclick = () => {
+        state.lastAction = "settings control";
+        const toast = $("toast");
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 1400);
+        dump();
+      };
+      if (vol) vol.oninput = () => {
+        state.volume = Number(vol.value);
+        state.lastAction = "volume " + Math.round(state.volume * 100) + "%";
+        dump();
+      };
+    }
+
+    function applyCursor() {
+      ["ph-wave", "ph-spec"].forEach((id) => {
+        const el = $(id);
+        el.classList.remove("cursor-hairline", "cursor-handle", "cursor-dot");
+        el.classList.add("cursor-" + state.cursor);
+      });
+      overlay.classList.remove("cursor-hairline", "cursor-handle", "cursor-dot");
+      overlay.classList.add("cursor-" + state.cursor);
+    }
+
+    function applyTheme() {
+      state.theme = osTheme();
+      if (state.waveColor === "system") {
+        overlay.style.removeProperty("--ov-wave");
+        const well = $("wave-color");
+        if (well) well.value = systemBlue();
+      } else {
+        overlay.style.setProperty("--ov-wave", state.waveColor);
+      }
+    }
+
+    function applyCmap() {
+      spec.src = window.PROTO.spec[state.cmap];
+    }
+
+    function applySplit() {
+      $("wave-pane").style.flexBasis = (state.split * 100) + "%";
+    }
+
+    function drawWave() {
+      const p = window.PROTO;
+      const canvas = wave;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(rect.width * dpr));
+      const h = Math.max(1, Math.floor(rect.height * dpr));
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, w, h);
+      const lanes = [p.wave.L, p.wave.R];
+      const midGap = Math.round(3 * dpr);
+      const laneH = (h - midGap) / 2;
+      const color = getComputedStyle(overlay).getPropertyValue("--ov-wave").trim();
+      lanes.forEach((lane, i) => {
+        const y0 = i * (laneH + midGap);
+        ctx.beginPath();
+        const n = lane.mx.length;
+        for (let x = 0; x < w; x++) {
+          const j = Math.min(n - 1, Math.floor(x / w * n));
+          const y = y0 + (1 - lane.mx[j]) * 0.5 * laneH;
+          if (x === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        for (let x = w - 1; x >= 0; x--) {
+          const j = Math.min(n - 1, Math.floor(x / w * n));
+          const y = y0 + (1 - lane.mn[j]) * 0.5 * laneH;
+          ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.72;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.stroke();
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath();
+        ctx.moveTo(0, y0 + laneH / 2);
+        ctx.lineTo(w, y0 + laneH / 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        if (i === 0) {
+          ctx.globalAlpha = 0.35;
+          ctx.beginPath();
+          ctx.moveTo(0, y0 + laneH + midGap / 2);
+          ctx.lineTo(w, y0 + laneH + midGap / 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      });
+    }
+
+    function setPlayhead() {
+      const p = window.PROTO;
+      const pct = (state.t / p.duration) * 100;
+      $("ph-wave").style.left = pct + "%";
+      $("ph-spec").style.left = pct + "%";
+      const clock = $("clock");
+      if (clock) clock.textContent = fmt(state.t) + " / " + fmt(p.duration);
+    }
+
+    function seekFromEvent(ev, pane) {
+      const rect = pane.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+      state.t = x * window.PROTO.duration;
+      state.lastAction = "seek " + fmt(state.t);
+      setPlayhead();
+      dump();
+    }
+
+    function tick(ts) {
+      if (!state.playing) return;
+      if (!lastTs) lastTs = ts;
+      const dt = (ts - lastTs) / 1000;
+      lastTs = ts;
+      state.t += dt;
+      if (state.t >= window.PROTO.duration) {
+        state.t = window.PROTO.duration;
+        state.playing = false;
+        state.lastAction = "ended (visual)";
+        renderChrome();
+        dump();
+      }
+      setPlayhead();
+      raf = requestAnimationFrame(tick);
+    }
+
+    function dump() {
+      const p = window.PROTO;
+      $("state").textContent = JSON.stringify({
+        file: p.file,
+        format: p.format,
+        sr: p.sr,
+        channels: p.channels,
+        duration: p.duration,
+        appearance: "system (" + state.theme + ")",
+        chrome: state.chrome,
+        colormap: state.cmap,
+        cursor: state.cursor,
+        waveColor: state.waveColor,
+        playheadSec: Number(state.t.toFixed(3)),
+        playing: state.playing,
+        volume: state.volume,
+        split: Number(state.split.toFixed(3)),
+        lastAction: state.lastAction,
+        audioLoaded: false
+      }, null, 2);
+    }
+
+    function applyAll() {
+      applyTheme();
+      renderChrome();
+      applyCursor();
+      applyCmap();
+      applySplit();
+      setPlayhead();
+      drawWave();
+      dump();
+    }
+
+    function setBundle(name) {
+      if (name === "slip") { state.chrome = "slip"; state.cmap = "magma"; state.cursor = "hairline"; }
+      if (name === "card") { state.chrome = "card"; state.cmap = "viridis"; state.cursor = "handle"; }
+      if (name === "scope") { state.chrome = "scope"; state.cmap = "grey"; state.cursor = "dot"; }
+      state.lastAction = "bundle " + name;
+      press($("bundles"), "data-bundle", name);
+      press($("chrome-seg"), "data-chrome", state.chrome);
+      press($("cmap-seg"), "data-cmap", state.cmap);
+      press($("cursor-seg"), "data-cursor", state.cursor);
+      applyAll();
+    }
+
+    $("bundles").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (b) setBundle(b.dataset.bundle);
+    };
+    $("chrome-seg").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      state.chrome = b.dataset.chrome;
+      state.lastAction = "chrome " + state.chrome;
+      press($("chrome-seg"), "data-chrome", state.chrome);
+      press($("bundles"), "data-bundle", "");
+      applyAll();
+    };
+    $("cmap-seg").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      state.cmap = b.dataset.cmap;
+      state.lastAction = "colormap " + state.cmap;
+      press($("cmap-seg"), "data-cmap", state.cmap);
+      press($("bundles"), "data-bundle", "");
+      applyAll();
+    };
+    $("cursor-seg").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      state.cursor = b.dataset.cursor;
+      state.lastAction = "cursor " + state.cursor;
+      press($("cursor-seg"), "data-cursor", state.cursor);
+      press($("bundles"), "data-bundle", "");
+      applyAll();
+    };
+    $("wave-color").oninput = () => {
+      state.waveColor = $("wave-color").value;
+      state.lastAction = "waveform color " + state.waveColor;
+      applyAll();
+    };
+    $("wave-reset").onclick = () => {
+      state.waveColor = "system";
+      state.lastAction = "waveform color system blue";
+      applyAll();
+    };
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      state.lastAction = "OS appearance " + osTheme();
+      applyAll();
+    });
+
+    $("wave-pane").onclick = (e) => seekFromEvent(e, $("wave-pane"));
+    $("spec-pane").onclick = (e) => seekFromEvent(e, $("spec-pane"));
+
+    const split = $("split");
+    let dragging = false;
+    split.onmousedown = (e) => {
+      dragging = true;
+      e.preventDefault();
+      state.lastAction = "split drag";
+    };
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const panes = document.querySelector(".panes").getBoundingClientRect();
+      const y = (e.clientY - panes.top) / panes.height;
+      state.split = Math.min(0.78, Math.max(0.22, y));
+      applySplit();
+      drawWave();
+      dump();
+    });
+    window.addEventListener("mouseup", () => { dragging = false; });
+
+    const origPlayWatch = () => {
+      if (state.playing && !raf) raf = requestAnimationFrame(tick);
+      if (!state.playing) { cancelAnimationFrame(raf); raf = 0; lastTs = 0; }
+    };
+    setInterval(origPlayWatch, 80);
+
+    window.addEventListener("resize", () => drawWave());
+
+    spec.onload = () => { drawWave(); setPlayhead(); };
+    if (!window.PROTO) {
+      document.body.insertAdjacentHTML("afterbegin", "<p style='padding:20px'>Missing viewer-look-data.js. Run prototypes/build_viewer_look.py first.</p>");
+    } else {
+      applyAll();
+      requestAnimationFrame(() => { drawWave(); setPlayhead(); });
+    }
+  </script>
+</body>
+</html>

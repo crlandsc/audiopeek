@@ -1,0 +1,18 @@
+---
+description: Playback of project files is allowed. Gate heavy work on thermal state and one CPU sample, one preview at a time.
+alwaysApply: true
+---
+
+# Playback allowed, machine load is gated
+
+Playback of project audio and video is allowed. That includes Finder spacebar, `qlmanage -p`, opening files in this app, AVPlayer / AVAudioPlayer, and anything else that sends sound to headphones or speakers.
+
+The open file's playback and its overview are one preview. They start together. Playback continues while that picture fills or recomputes. Do not delay play until the picture finishes.
+
+Before a heavy run, and about once a second while it is active, read thermal state (`ProcessInfo.processInfo.thermalState` or the same check in a shell or test harness) and one CPU-busy sample (`host_statistics` or equivalent). Do not busy-wait. Do not run `powermetrics`, do not use sudo, do not ask for a password, and do not add a GPU-utilization sampler. Thermal state is the GPU signal. `nominal` and `fair` are runnable. `serious` and `critical` mean do not start, or pause.
+
+CPU: pause when busy time is at or above 85% of the sample window. Resume only after one window at or below 70% and thermal state is `nominal` or `fair`.
+
+One heavy pair at a time: overview plus playback of the current file. A second file, a second overview, or a test sweep does not start on top.
+
+The librosa check reads its fixture as data and does not play it. Agent and test playback, unless that run is the volume control, uses a process-local gain and does not change system volume or the persisted slider.
