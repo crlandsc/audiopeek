@@ -1,11 +1,17 @@
 import AppKit
 import Foundation
 
+struct InjectedLoad {
+    var thermal: String
+    var cpu: Double
+}
+
 struct TestLaunchConfig {
     var defaultsSuite: String
     var statePath: String
     var injection: InjectedLoginRegistrar.Mode?
     var finderScript: ScriptedFinderSelection.Script?
+    var injectedLoad: InjectedLoad?
 
     func makeDefaults() -> UserDefaults {
         guard let defaults = UserDefaults(suiteName: defaultsSuite) else {
@@ -40,6 +46,8 @@ struct TestLaunchConfig {
                 injection = .invalidSignature
             case "other":
                 injection = .other
+            case "succeeded":
+                injection = .succeeded
             default:
                 fputs("AudioPeek unknown login failure injection\n", stderr)
                 exit(1)
@@ -52,8 +60,16 @@ struct TestLaunchConfig {
             defaultsSuite: suite,
             statePath: statePath,
             injection: injection,
-            finderScript: finderScript(from: json["finderSelection"])
+            finderScript: finderScript(from: json["finderSelection"]),
+            injectedLoad: injectedLoad(from: json["machineLoad"])
         )
+    }
+
+    private static func injectedLoad(from value: Any?) -> InjectedLoad? {
+        guard let load = value as? [String: Any] else { return nil }
+        let thermal = load["thermal"] as? String ?? "nominal"
+        let cpu = (load["cpu"] as? NSNumber)?.doubleValue ?? 0
+        return InjectedLoad(thermal: thermal, cpu: cpu)
     }
 
     private static func finderScript(from value: Any?) -> ScriptedFinderSelection.Script? {
@@ -174,6 +190,10 @@ final class TestBridge: NSObject {
             hotkeyFactoryFellBack: app.hotkeyFactoryFellBack,
             lastProbeStatus: Int(hotkey.lastProbeStatus),
             playClicks: slip.playClicks,
+            playheadSeconds: slip.playheadSeconds,
+            durationSeconds: slip.durationSeconds,
+            loadThermal: thermalName(slip.lastLoad.thermal),
+            loadCPU: slip.lastLoad.cpuBusy,
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -225,6 +245,19 @@ final class TestBridge: NSObject {
             scriptedFinder?.set(mode: mode, paths: paths)
         case "pressPlay":
             slip.pressPlay()
+        case "setLoad":
+            let thermal = userInfo["thermal"] as? String ?? "nominal"
+            let cpu = number("cpu", in: userInfo) ?? 0
+            slip.setInjectedLoad(thermal: thermal, cpu: cpu, applyNow: true)
+        case "seek":
+            let pane = userInfo["pane"] as? String ?? "waveform"
+            let fraction = number("fraction", in: userInfo) ?? 0
+            slip.seek(pane: pane, fraction: fraction)
+        case "setPanes":
+            slip.setPanes(
+                waveform: bool("waveform", in: userInfo) ?? true,
+                spectrogram: bool("spectrogram", in: userInfo) ?? true
+            )
         case "setSlipVolume":
             if let volume = number("volume", in: userInfo) {
                 store.setVolume(volume)
@@ -292,6 +325,21 @@ final class TestBridge: NSObject {
         return nil
     }
 
+    private func thermalName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal:
+            return "nominal"
+        case .fair:
+            return "fair"
+        case .serious:
+            return "serious"
+        case .critical:
+            return "critical"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
     private func strings(_ key: String, in userInfo: [AnyHashable: Any]) -> [String] {
         if let values = userInfo[key] as? [String] { return values }
         if let values = userInfo[key] as? [Any] {
@@ -340,6 +388,10 @@ private struct TestState: Encodable {
     var hotkeyFactoryFellBack: Bool
     var lastProbeStatus: Int
     var playClicks: Int
+    var playheadSeconds: Double
+    var durationSeconds: Double
+    var loadThermal: String
+    var loadCPU: Double?
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double

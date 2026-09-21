@@ -39,16 +39,22 @@ final class InjectedLoginRegistrar: LoginRegistrar {
     enum Mode: Equatable {
         case invalidSignature
         case other
+        case succeeded
     }
 
     let mode: Mode
     private(set) var openCount = 0
+    private var enabled = false
 
     init(mode: Mode) {
         self.mode = mode
     }
 
     func register() throws {
+        if mode == .succeeded {
+            enabled = true
+            return
+        }
         let code = mode == .invalidSignature
             ? LoginServiceCode.invalidSignature
             : LoginServiceCode.internalFailure
@@ -59,9 +65,13 @@ final class InjectedLoginRegistrar: LoginRegistrar {
         )
     }
 
-    func unregister() throws {}
+    func unregister() throws {
+        enabled = false
+    }
 
-    var status: SMAppService.Status { .notRegistered }
+    var status: SMAppService.Status {
+        mode == .succeeded && enabled ? .enabled : .notRegistered
+    }
 
     func openSystemSettingsLoginItems() {
         openCount += 1

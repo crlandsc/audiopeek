@@ -37,14 +37,18 @@ final class SlipContentView: NSView {
     let metadataLabel = NSTextField(labelWithString: "")
     let volumeSlider = NSSlider()
     let gearButton = NSButton()
-    let waveformPane = NSView()
-    let spectrogramPane = NSView()
+    let waveformPane = SlipPaneView()
+    let spectrogramPane = SlipPaneView()
     let divider = NSView()
+    let waveformPlayhead = NSView()
+    let spectrogramPlayhead = NSView()
 
     var onPlay: () -> Void = {}
     var onVolume: (Double) -> Void = { _ in }
     var onGear: () -> Void = {}
     var onSplit: (Double) -> Void = { _ in }
+    var onSeek: (String, Double) -> Void = { _, _ in }
+    private var playheadFraction = 0.0
 
     var showWaveform = true
     var showSpectrogram = true
@@ -91,10 +95,20 @@ final class SlipContentView: NSView {
 
         waveformPane.setAccessibilityIdentifier("slip.waveform")
         spectrogramPane.setAccessibilityIdentifier("slip.spectrogram")
+        waveformPane.onClick = { [weak self] fraction in
+            self?.onSeek("waveform", fraction)
+        }
+        spectrogramPane.onClick = { [weak self] fraction in
+            self?.onSeek("spectrogram", fraction)
+        }
+        waveformPlayhead.setAccessibilityIdentifier("slip.playhead.waveform")
+        spectrogramPlayhead.setAccessibilityIdentifier("slip.playhead.spectrogram")
 
         for view in [playButton, filenameLabel, metadataLabel, volumeSlider, gearButton, waveformPane, spectrogramPane, divider] {
             addSubview(view)
         }
+        waveformPane.addSubview(waveformPlayhead)
+        spectrogramPane.addSubview(spectrogramPlayhead)
         applyPalette()
     }
 
@@ -104,6 +118,27 @@ final class SlipContentView: NSView {
 
     var headerOrder: [String] {
         ["play", "filename", "metadata", "volume", "settings"]
+    }
+
+    func setPlaying(_ playing: Bool) {
+        let name = playing ? "pause.fill" : "play.fill"
+        playButton.image = NSImage(systemSymbolName: name, accessibilityDescription: "Play or pause")
+    }
+
+    func setPlayhead(fraction: Double) {
+        playheadFraction = min(max(fraction, 0), 1)
+        needsLayout = true
+    }
+
+    func seekFraction(in pane: String) -> ((Double) -> Void)? {
+        switch pane {
+        case "waveform":
+            return showWaveform ? { self.onSeek("waveform", $0) } : nil
+        case "spectrogram":
+            return showSpectrogram ? { self.onSeek("spectrogram", $0) } : nil
+        default:
+            return nil
+        }
     }
 
     func apply(showWaveform: Bool, showSpectrogram: Bool, split: Double, volume: Double) {
@@ -153,6 +188,13 @@ final class SlipContentView: NSView {
         } else if showSpectrogram {
             spectrogramPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: body)
         }
+        placePlayhead(waveformPlayhead, in: waveformPane)
+        placePlayhead(spectrogramPlayhead, in: spectrogramPane)
+    }
+
+    private func placePlayhead(_ playhead: NSView, in pane: NSView) {
+        let x = max(0, min(pane.bounds.width - 1, pane.bounds.width * playheadFraction))
+        playhead.frame = NSRect(x: x, y: 0, width: 1, height: pane.bounds.height)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -258,9 +300,26 @@ final class SlipContentView: NSView {
         waveformPane.layer?.backgroundColor = palette.pane.cgColor
         spectrogramPane.layer?.backgroundColor = palette.pane.cgColor
         divider.layer?.backgroundColor = palette.line.cgColor
+        waveformPlayhead.wantsLayer = true
+        spectrogramPlayhead.wantsLayer = true
+        waveformPlayhead.layer?.backgroundColor = palette.head.cgColor
+        spectrogramPlayhead.layer?.backgroundColor = palette.head.cgColor
     }
 
-    @objc private func playPressed() {
+}
+
+final class SlipPaneView: NSView {
+    var onClick: ((Double) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        guard bounds.width > 1 else { return }
+        onClick?(Double(local.x / bounds.width))
+    }
+}
+
+extension SlipContentView {
+    @objc fileprivate func playPressed() {
         playClicks += 1
         onPlay()
     }

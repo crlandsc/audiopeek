@@ -12,15 +12,20 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private let hotkey: HotkeyCenter
     private let onOpenSettings: () -> Void
     private let content = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
+    private let playback = PlaybackController()
+    private let gate = MachineLoadGate()
     private var panel: SlipWindow?
     private var pollTimer: Timer?
+    private var gateTimer: Timer?
+    private var playheadTimer: Timer?
     private var frameSave: DispatchWorkItem?
     private var epoch = 0
     private var inFlight = false
     private var currentURL: URL?
     private(set) var requestCount = 0
-    let playbackRunning = false
+    private(set) var lastLoad = LoadSample(thermal: .nominal, cpuBusy: nil)
     var onActivity: () -> Void = {}
+    var onFileOpened: () -> Void = {}
 
     init(store: SettingsStore, finder: FinderSelectionSource, hotkey: HotkeyCenter, onOpenSettings: @escaping () -> Void) {
         self.store = store
@@ -28,10 +33,22 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         self.hotkey = hotkey
         self.onOpenSettings = onOpenSettings
         super.init()
-        content.onPlay = { }
+        content.onPlay = { [weak self] in
+            self?.togglePlay()
+        }
         content.onVolume = { [weak self] value in
             self?.store.setVolume(value)
+            self?.playback.setGain(self?.store.effectiveVolume ?? value)
         }
+        content.onSeek = { [weak self] _, fraction in
+            self?.playback.seek(toFraction: fraction)
+            self?.syncPlayhead()
+        }
+        playback.onChange = { [weak self] in
+            self?.syncPlayhead()
+            self?.onActivity()
+        }
+        playback.setGain(store.effectiveVolume)
         content.onGear = { [weak self] in
             self?.onOpenSettings()
         }
@@ -52,6 +69,12 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var headerOrder: [String] { content.headerOrder }
 
     var playClicks: Int { content.playClicks }
+
+    var playbackRunning: Bool { playback.isPlaying }
+
+    var playheadSeconds: TimeInterval { playback.position }
+
+    var durationSeconds: TimeInterval { playback.duration }
 
     var canBecomeKey: Bool { panel?.canBecomeKey ?? false }
 
@@ -83,6 +106,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             split: store.blob.splitFraction,
             volume: store.effectiveVolume
         )
+        playback.setGain(store.effectiveVolume)
         guard let panel, let stored = store.blob.windowFrame else { return }
         let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
         if abs(panel.frame.origin.x - rect.origin.x) > 0.5
@@ -97,9 +121,50 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         epoch += 1
         inFlight = false
         stopPoll()
+        stopPlayback()
         hotkey.setEscapeEnabled(false)
         panel?.orderOut(nil)
         onActivity()
+    }
+
+    func setInjectedLoad(thermal: String, cpu: Double, applyNow: Bool) {
+        let state: ProcessInfo.ThermalState
+        switch thermal {
+        case "fair":
+            state = .fair
+        case "serious":
+            state = .serious
+        case "critical":
+            state = .critical
+        default:
+            state = .nominal
+        }
+        gate.setInjected(thermal: state, cpu: cpu)
+        if applyNow {
+            evaluateGate()
+        }
+    }
+
+    func seek(pane: String, fraction: Double) {
+        let visible: Bool
+        switch pane {
+        case "waveform":
+            visible = store.blob.showWaveform
+        case "spectrogram":
+            visible = store.blob.showSpectrogram
+        default:
+            return
+        }
+        guard visible else { return }
+        playback.seek(toFraction: fraction)
+        syncPlayhead()
+    }
+
+    func setPanes(waveform: Bool, spectrogram: Bool) {
+        store.update {
+            $0.showWaveform = waveform
+            $0.showSpectrogram = spectrogram
+        }
     }
 
     func writePNG(to url: URL) -> Bool {
@@ -160,17 +225,88 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         panel = window
         let changed = currentURL != url
         currentURL = url
-        if changed {
-            content.filenameLabel.stringValue = url.lastPathComponent
-            content.metadataLabel.stringValue = AudioFileKind.metadataLabel(for: url)
-        }
         if !window.isVisible {
             window.orderFrontRegardless()
             hotkey.setEscapeEnabled(true)
             startPoll()
         }
+        if changed || playback.duration == 0 {
+            beginOpen(url)
+        }
         content.needsLayout = true
         onActivity()
+    }
+
+    private func beginOpen(_ url: URL) {
+        content.filenameLabel.stringValue = url.lastPathComponent
+        guard let info = playback.open(url: url) else {
+            hide()
+            return
+        }
+        content.metadataLabel.stringValue = AudioFileKind.metadataLine(
+            format: AudioFileKind.metadataLabel(for: url),
+            sampleRate: info.sampleRate,
+            channels: info.channels,
+            duration: info.duration
+        )
+        playback.setGain(store.effectiveVolume)
+        onFileOpened()
+        startGate()
+        evaluateGate()
+    }
+
+    private func togglePlay() {
+        playback.toggle()
+        evaluateGate()
+        syncPlayhead()
+    }
+
+    private func evaluateGate() {
+        let sample = gate.sample()
+        lastLoad = sample
+        let allows = gate.allowsPlayback(sample)
+        playback.applyGate(allows: allows && isVisible)
+        syncPlayhead()
+    }
+
+    private func syncPlayhead() {
+        playback.refreshPosition()
+        let fraction = playback.duration > 0 ? playback.position / playback.duration : 0
+        content.setPlayhead(fraction: fraction)
+        content.setPlaying(playback.isPlaying)
+    }
+
+    private func startGate() {
+        if gateTimer == nil {
+            let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.evaluateGate()
+                    self?.onActivity()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            gateTimer = timer
+        }
+        if playheadTimer == nil {
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.playback.isPlaying else { return }
+                    self.syncPlayhead()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            playheadTimer = timer
+        }
+    }
+
+    private func stopPlayback() {
+        gateTimer?.invalidate()
+        gateTimer = nil
+        playheadTimer?.invalidate()
+        playheadTimer = nil
+        playback.stop()
+        content.setPlaying(false)
+        content.setPlayhead(fraction: 0)
     }
 
     private func makePanel() -> SlipWindow {

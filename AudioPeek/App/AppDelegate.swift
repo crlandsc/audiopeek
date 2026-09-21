@@ -64,6 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyCenter.onEscape = { [weak self] in
             self?.slip.escape()
         }
+        slip.onFileOpened = { [weak self] in
+            self?.login.noteFirstSuccessfulAudioOpen()
+        }
+        if let load = config?.injectedLoad {
+            slip.setInjectedLoad(thermal: load.thermal, cpu: load.cpu, applyNow: false)
+        }
         store.onChange = { [weak self] in
             self?.applyChrome()
             self?.slip.applySettings()
