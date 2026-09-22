@@ -79,6 +79,10 @@ struct SettingsView: View {
                         Toggle("Show spectrogram", isOn: store.binding(\.showSpectrogram))
                         Toggle("Waveform dual view", isOn: store.binding(\.waveformDual))
                         Toggle("Spectrogram dual view", isOn: store.binding(\.spectrogramDual))
+                        Toggle("Full detail", isOn: store.binding(\.staticOverview))
+                        Text("Full detail reads every sample. Leave it off and files longer than 30 seconds use a coarser picture.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Picker("Amplitude", selection: store.binding(\.waveformAmplitude)) {
                             Text("Linear").tag(WaveformAmplitude.linear)
                             Text("dB").tag(WaveformAmplitude.decibels)
@@ -102,9 +106,23 @@ struct SettingsView: View {
                             .frame(width: 48, height: 24)
                             .accessibilityIdentifier("waveform.colorWell")
                         }
+                        .padding(.trailing, 12)
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent("Split") {
-                                Slider(value: store.binding(\.splitFraction), in: 0...1)
+                                Slider(value: Binding(
+                                    get: { store.blob.splitFraction },
+                                    set: { newValue in
+                                        let snapped = SplitSnap.value(newValue)
+                                        store.update { $0.splitFraction = snapped }
+                                    }
+                                ), in: 0...1)
+                                .overlay(alignment: .bottom) {
+                                    Circle()
+                                        .frame(width: 4, height: 4)
+                                        .foregroundStyle(.secondary)
+                                        .offset(y: 7)
+                                        .accessibilityIdentifier("split.midpoint")
+                                }
                             }
                             Text("Waveform on top, spectrogram below. The middle is 50/50.")
                                 .font(.caption)
