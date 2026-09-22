@@ -1,6 +1,6 @@
 # AudioPeek
 
-AudioPeek previews the audio file you have selected in Finder. Option-Space opens a floating panel with a waveform, a spectrogram, and playback. Spacebar stays Apple's player.
+AudioPeek previews the audio file you have selected in Finder. Option-Space opens a floating panel with a waveform, a spectrogram, and playback. While that panel is open, space toggles play, and the arrow keys still move the Finder selection.
 
 The public repo is [https://github.com/crlandsc/audiopeek](https://github.com/crlandsc/audiopeek).
 
