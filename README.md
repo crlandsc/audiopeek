@@ -16,7 +16,7 @@ The first time AudioPeek successfully opens an audio file, it turns on the login
 
 ## Finder Automation
 
-AudioPeek reads the Finder selection so the hotkey can open the selected file. Allow the Automation prompt for Finder.
+AudioPeek reads the Finder selection so the hotkey can open the selected file. Allow the Automation prompt for Finder. If the hotkey opens Settings, the Finder access section explains the grant and the Open Automation button opens System Settings > Privacy & Security > Automation. Enable AudioPeek for Finder, then press the hotkey again.
 
 Every new disk image is a new ad-hoc signature, so macOS treats the update as a different app. After you replace AudioPeek with a newer disk image, grant Automation again: System Settings > Privacy & Security > Automation, and enable AudioPeek for Finder.
 

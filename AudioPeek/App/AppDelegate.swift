@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenLoginItems: { [weak self] in
                 self?.login.openSystemSettings()
             },
+            onOpenAutomation: {
+                guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation") else {
+                    return
+                }
+                NSWorkspace.shared.open(url)
+            },
             onReset: { [weak self] in
                 self?.login.reset()
             }

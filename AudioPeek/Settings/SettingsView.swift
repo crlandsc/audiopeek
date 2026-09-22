@@ -16,11 +16,31 @@ struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     var onLoginToggle: (Bool) -> Void
     var onOpenLoginItems: () -> Void
+    var onOpenAutomation: () -> Void
     var onReset: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if !store.finderMessage.isEmpty {
+                    GroupBox("Finder access") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(store.finderMessage)
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("finder.automationMessage")
+                            Button("Open Automation") {
+                                onOpenAutomation()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.accentColor)
+                            .accessibilityIdentifier("finder.openAutomation")
+                            .accessibilityLabel("Open Automation")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 GroupBox("Chrome") {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Open at login", isOn: Binding(
@@ -43,13 +63,6 @@ struct SettingsView: View {
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("login.registered")
-                        }
-                        if !store.finderMessage.isEmpty {
-                            Text(store.finderMessage)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("finder.automationMessage")
                         }
                         Toggle("Show menu bar icon", isOn: store.binding(\.showStatusItem))
                         Toggle("Show Dock icon", isOn: store.binding(\.showDockIcon))

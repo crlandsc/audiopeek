@@ -6,6 +6,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
     private let onLoginToggle: (Bool) -> Void
     private let onOpenLoginItems: () -> Void
+    private let onOpenAutomation: () -> Void
     private let onReset: () -> Void
     private var window: NSWindow?
 
@@ -13,11 +14,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         store: SettingsStore,
         onLoginToggle: @escaping (Bool) -> Void,
         onOpenLoginItems: @escaping () -> Void,
+        onOpenAutomation: @escaping () -> Void,
         onReset: @escaping () -> Void
     ) {
         self.store = store
         self.onLoginToggle = onLoginToggle
         self.onOpenLoginItems = onOpenLoginItems
+        self.onOpenAutomation = onOpenAutomation
         self.onReset = onReset
     }
 
@@ -98,6 +101,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             store: store,
             onLoginToggle: onLoginToggle,
             onOpenLoginItems: onOpenLoginItems,
+            onOpenAutomation: onOpenAutomation,
             onReset: onReset
         )
         window.contentViewController = NSHostingController(rootView: root)

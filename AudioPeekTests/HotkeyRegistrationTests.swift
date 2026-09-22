@@ -26,6 +26,9 @@ final class HotkeyRegistrationTests: XCTestCase {
     func testCompiledFinderEventTargetsSelection() {
         let event = FinderSelectionEvent.make()
         XCTAssertEqual(event.eventID, AEEventID(kAEGetData))
-        XCTAssertNotNil(event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject)))
+        let text = String(describing: event)
+        XCTAssertTrue(text.contains("'seld':'sele'"), text)
+        XCTAssertTrue(text.contains("'rtyp':'furl'"), text)
+        XCTAssertFalse(text.contains("eles"), text)
     }
 }

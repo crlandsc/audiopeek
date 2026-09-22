@@ -299,7 +299,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         switch read {
         case .failed:
             stopPoll()
-            store.setFinderMessage("AudioPeek could not read the Finder selection. Enable AudioPeek for Finder.")
+            store.setFinderMessage("AudioPeek could not read the Finder selection. Enable AudioPeek for Finder in System Settings > Privacy & Security > Automation, then press the hotkey again.")
             onOpenSettings()
             onActivity()
         case .files(let urls):

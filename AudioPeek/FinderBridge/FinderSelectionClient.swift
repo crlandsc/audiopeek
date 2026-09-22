@@ -22,9 +22,10 @@ enum FinderSelectionEvent {
         )
         var container = AEDesc()
         AECreateDesc(typeNull, nil, 0, &container)
-        let code = OSType(0x73656C65)
+        // typeType stores the host-endian OSType. A big-endian swap asks Finder for "eles".
+        var code = OSType(0x73656C65)
         var keyData = AEDesc()
-        withUnsafeBytes(of: code.bigEndian) { raw in
+        withUnsafeBytes(of: &code) { raw in
             _ = AECreateDesc(typeType, raw.baseAddress, raw.count, &keyData)
         }
         var specifier = AEDesc()
@@ -41,7 +42,14 @@ enum FinderSelectionEvent {
         }
         let object = NSAppleEventDescriptor(aeDescNoCopy: &specifier)
         event.setParam(object, forKeyword: AEKeyword(keyDirectObject))
+        event.setParam(typeCode(typeFileURL), forKeyword: AEKeyword(keyAERequestedType))
         return event
+    }
+
+    private static func typeCode(_ code: OSType) -> NSAppleEventDescriptor {
+        var value = code
+        let data = withUnsafeBytes(of: &value) { Data($0) }
+        return NSAppleEventDescriptor(descriptorType: typeType, data: data) ?? NSAppleEventDescriptor(string: "")
     }
 }
 
