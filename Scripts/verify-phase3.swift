@@ -188,6 +188,7 @@ state = command("pressPlay")
 Check.expect(state["playbackRunning"]?.bool == false, "pause stops playback")
 let pausedAt = state["playheadSeconds"]?.double ?? 0
 state = command("pressPlay")
+state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
 Check.expect(state["playbackRunning"]?.bool == true, "resume continues playback")
 Check.expect(abs((state["playheadSeconds"]?.double ?? 0) - pausedAt) < 0.15, "resume keeps the playhead, got \(state["playheadSeconds"]?.double ?? -1)")
 state = command("pressPlay")

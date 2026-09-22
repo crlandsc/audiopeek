@@ -235,6 +235,14 @@ Check.expect(state["waveformUsesSystemBlue"]?.bool == false, "the color well ove
 Check.expect(near(state, "waveformRed", 1, slack: 0.01) && near(state, "waveformGreen", 0, slack: 0.01) && near(state, "waveformBlue", 0, slack: 0.01), "custom waveform is red")
 Check.expect((state["overviewPassID"]?.int ?? -1) == paintingPass, "a color change does not restart the pass")
 Check.expect(state["playbackRunning"]?.bool == true, "playback continues through the color change")
+let lanesBefore = state["overviewLaneCount"]?.int ?? -1
+let binsBefore = state["spectrogramBinCount"]?.int ?? -1
+state = command("setAmplitude", extra: ["amplitude": "decibels"])
+Check.expect((state["overviewPassID"]?.int ?? -1) == paintingPass, "amplitude does not restart the pass")
+Check.expect((state["spectrogramBinCount"]?.int ?? -1) == binsBefore, "amplitude keeps the spectrogram")
+state = command("setDbFloor", extra: ["floor": -40])
+Check.expect((state["overviewPassID"]?.int ?? -1) == paintingPass, "db floor does not restart the pass")
+Check.expect((state["overviewLaneCount"]?.int ?? -1) == lanesBefore, "db floor keeps the waveform")
 
 state = command("reset")
 Check.expect(state["waveformUsesSystemBlue"]?.bool == true, "reset restores system blue")

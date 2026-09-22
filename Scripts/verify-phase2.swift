@@ -112,7 +112,7 @@ func writeWav(to url: URL) {
         var little = value.littleEndian
         withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
     }
-    let frames = 44100
+    let frames = 44100 * 8
     data.append(contentsOf: "RIFF".utf8)
     append32(UInt32(36 + frames * 2))
     data.append(contentsOf: "WAVE".utf8)
@@ -268,14 +268,33 @@ Check.expect(state["slipVisible"]?.bool == false, "a folder leaves the panel clo
 state = command("setFinder", extra: ["mode": "paths", "paths": [wavA.path]])
 state = command("dispatchViewerHotkey", settle: true)
 state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true && $0["playbackRunning"]?.bool == true } ?? state
+let openedPlaying = state["playbackRunning"]?.bool == true
 Check.expect(state["slipVisible"]?.bool == true, "one audio file opens the panel")
 Check.expect(state["slipFilename"]?.string == "tone.wav", "filename \(state["slipFilename"]?.string ?? "")")
-Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:01", "metadata \(state["slipMetadata"]?.string ?? "")")
-Check.expect(state["headerOrder"]?.strings == ["play", "filename", "metadata", "volume", "settings"], "header order \(state["headerOrder"]?.strings ?? [])")
+Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "metadata \(state["slipMetadata"]?.string ?? "")")
+Check.expect(state["headerOrder"]?.strings == ["play", "filename", "metadata", "volume", "loop", "settings"], "header order \(state["headerOrder"]?.strings ?? [])")
+Check.expect(state["movableByBackground"]?.bool == false, "the window does not drag from the background")
+Check.expect((state["metadataMaxX"]?.double ?? 9999) <= (state["volumeMinX"]?.double ?? 0) + 0.5, "metadata stays left of the volume control")
+Check.expect((state["loopMinX"]?.double ?? 0) + 20 < (state["gearMinX"]?.double ?? 0), "loop sits left of settings")
+Check.expect(state["filenameToolTip"]?.string == "tone.wav", "filename help tag")
+Check.expect(state["metadataToolTip"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "metadata help tag")
+Check.expect(state["blob"]?["loopEnabled"]?.bool == false, "loop defaults off")
+state = command("probeHit", extra: ["x": 80, "y": 10])
+Check.expect(state["hitKind"]?.string == "header", "header drag region \(state["hitKind"]?.string ?? "")")
+state = command("probeHit", extra: ["x": 80, "y": 120])
+Check.expect(state["hitKind"]?.string == "waveform", "waveform scrub region \(state["hitKind"]?.string ?? "")")
 Check.expect(state["finderPollScheduled"]?.bool == true, "visible panel schedules the Finder timer")
 Check.expect(state["escapeHotkeyRegistered"]?.bool == true, "escape is registered while the panel is visible")
-Check.expect(state["playbackRunning"]?.bool == true, "opening the panel starts playback")
-Check.expect(state["panelIsKey"]?.bool == false, "the panel is not key")
+Check.expect(openedPlaying, "opening the panel starts playback")
+Check.expect(state["panelCanBecomeKey"]?.bool == false, "the open panel does not become key")
+Check.expect(state["panelIsKey"]?.bool == false, "Finder keeps the key window")
+Check.expect(state["previewSpaceRegistered"]?.bool == true, "space toggles play while the preview is open")
+state = command("dispatchPreviewSpace")
+state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
+Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback")
+state = command("dispatchPreviewSpace")
+state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
+Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback")
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
 Check.expect(abs((state["slipFrameHeight"]?.double ?? 0) - 500) < 1, "first height 500, got \(state["slipFrameHeight"]?.double ?? 0)")
 
@@ -294,6 +313,11 @@ state = waitUntil(at: stateURL, timeout: 2) {
 } ?? state
 Check.expect((state["playClicks"]?.int ?? 0) >= 1, "play control is visible")
 Check.expect(state["playbackRunning"]?.bool == false, "play pauses the autoplay")
+state = command("seek", extra: ["pane": "waveform", "fraction": 0.25])
+state = waitUntil(at: stateURL, timeout: 2) { abs(($0["playheadSeconds"]?.double ?? -1) - 2.0) < 0.2 } ?? state
+state = command("seek", extra: ["pane": "waveform", "fraction": 0.5])
+state = waitUntil(at: stateURL, timeout: 2) { abs(($0["playheadSeconds"]?.double ?? -1) - 4.0) < 0.25 } ?? state
+Check.expect(abs((state["playheadSeconds"]?.double ?? -1) - 4.0) < 0.25, "a second seek moves the playhead, got \(state["playheadSeconds"]?.double ?? -1)")
 state = command("setSlipVolume", extra: ["volume": 0.4])
 state = waitUntil(at: stateURL, timeout: 2) { abs(($0["storedVolume"]?.double ?? -1) - 0.4) < 0.001 } ?? state
 Check.expect(abs((state["storedVolume"]?.double ?? -1) - 0.4) < 0.001, "slider stores 0.4, got \(state["storedVolume"]?.double ?? -1)")
@@ -315,7 +339,7 @@ Check.expect(state["slipVisible"]?.bool == true, "a click outside leaves the pan
 state = command("setFinder", extra: ["mode": "paths", "paths": [wavB.path]])
 let followed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipFilename"]?.string == "other.wav" }
 Check.expect(followed?["slipFilename"]?.string == "other.wav", "the poll follows a new audio file")
-Check.expect(followed?["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:01", "the new file's metadata is \(followed?["slipMetadata"]?.string ?? "")")
+Check.expect(followed?["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "the new file's metadata is \(followed?["slipMetadata"]?.string ?? "")")
 
 state = command("setFinder", extra: ["mode": "paths", "paths": []])
 let closed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipVisible"]?.bool == false }
@@ -332,9 +356,13 @@ state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true } ?? state
 Check.expect(state["slipVisible"]?.bool == true, "the hotkey opens the panel again")
 let carbonBeforeEscape = state["carbonDeliveries"]?.int ?? 0
 state = command("dispatchEscape")
+state = waitUntil(at: stateURL, timeout: 2) {
+    ($0["carbonDeliveries"]?.int ?? 0) > carbonBeforeEscape && $0["slipVisible"]?.bool == false
+} ?? state
 Check.expect((state["carbonDeliveries"]?.int ?? 0) > carbonBeforeEscape, "escape went through the carbon handler")
 Check.expect(state["slipVisible"]?.bool == false, "escape closes the panel")
 Check.expect(state["escapeHotkeyRegistered"]?.bool == false, "escape is not registered once the panel is closed")
+Check.expect(state["previewSpaceRegistered"]?.bool == false, "space is not taken once the panel is closed")
 Check.expect(state["finderPollScheduled"]?.bool == false, "escape unschedules the Finder timer")
 Check.expect(state["panelIsKey"]?.bool != true, "escape does not leave the panel key")
 
