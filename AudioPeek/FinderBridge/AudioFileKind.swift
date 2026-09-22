@@ -33,7 +33,8 @@ enum AudioFileKind {
         sampleRate: Double,
         channels: Int,
         duration: TimeInterval,
-        waveformShowing: Int? = nil
+        waveformShowing: Int? = nil,
+        spectrogramShowing: Int? = nil
     ) -> String {
         let khz = sampleRate / 1000
         let rate: String
@@ -44,12 +45,14 @@ enum AudioFileKind {
         }
         let whole = max(0, Int(duration.rounded(.down)))
         let clock = "\(whole / 60):" + String(format: "%02d", whole % 60)
-        let channelText: String
+        var phrases: [String] = []
         if let waveformShowing, waveformShowing < channels {
-            channelText = "\(channels) ch · showing \(waveformShowing)"
-        } else {
-            channelText = "\(channels) ch"
+            phrases.append("\(channels) ch · showing \(waveformShowing)")
         }
+        if let spectrogramShowing, spectrogramShowing < channels {
+            phrases.append("\(channels) ch · showing \(spectrogramShowing)")
+        }
+        let channelText = phrases.isEmpty ? "\(channels) ch" : phrases.joined(separator: " · ")
         return "\(format) · \(rate) · \(channelText) · \(clock)"
     }
 }

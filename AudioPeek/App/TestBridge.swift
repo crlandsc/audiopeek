@@ -205,6 +205,12 @@ final class TestBridge: NSObject {
             overviewPassID: slip.overviewPassID,
             overviewPeakPasses: slip.overviewPeakPasses,
             overviewFirstMaximum: slip.overviewFirstMaximum,
+            progressVisible: slip.progressVisible,
+            progressFraction: slip.progressFraction,
+            estimateSeconds: slip.estimateSeconds,
+            spectrogramLaneCount: slip.spectrogramLaneCount,
+            spectrogramBinCount: slip.spectrogramBinCount,
+            spectrogramPeak: slip.spectrogramPeak,
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -274,6 +280,12 @@ final class TestBridge: NSObject {
         case "setWaveformDual":
             let dual = bool("dual", in: userInfo) ?? true
             store.update { $0.waveformDual = dual }
+        case "setSpectrogramDual":
+            let dual = bool("dual", in: userInfo) ?? false
+            store.update { $0.spectrogramDual = dual }
+        case "setSpectrogramNFFT":
+            let count = Int(number("nFFT", in: userInfo) ?? 2048)
+            store.update { $0.spectrogram.nFFT = count }
         case "setSlipVolume":
             if let volume = number("volume", in: userInfo) {
                 store.setVolume(volume)
@@ -417,6 +429,12 @@ private struct TestState: Encodable {
     var overviewPassID: Int
     var overviewPeakPasses: Int
     var overviewFirstMaximum: Double
+    var progressVisible: Bool
+    var progressFraction: Double
+    var estimateSeconds: Double
+    var spectrogramLaneCount: Int
+    var spectrogramBinCount: Int
+    var spectrogramPeak: Double
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double

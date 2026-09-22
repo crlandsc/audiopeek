@@ -106,6 +106,30 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         return Double(column.maximum)
     }
 
+    var estimateSeconds: Double { currentEstimate }
+
+    var progressVisible: Bool {
+        OverviewEstimate.showsBar(currentEstimate) && overviewSnapshot.running && !overviewSnapshot.finished
+    }
+
+    var progressFraction: Double { overviewSnapshot.progress }
+
+    var spectrogramLaneCount: Int { overviewSnapshot.spectrogram.count }
+
+    var spectrogramBinCount: Int { overviewSnapshot.spectrogram.first?.first?.count ?? 0 }
+
+    var spectrogramPeak: Double {
+        var peak: Float = 0
+        for lane in overviewSnapshot.spectrogram {
+            for column in lane {
+                for value in column where value > peak {
+                    peak = value
+                }
+            }
+        }
+        return Double(peak)
+    }
+
     var canBecomeKey: Bool { panel?.canBecomeKey ?? false }
 
     var isKeyWindow: Bool { panel?.isKeyWindow ?? false }
@@ -149,15 +173,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             }
         }
         content.layoutSubtreeIfNeeded()
-        content.setWaveform(
-            snapshot: overviewSnapshot,
-            amplitude: next.waveformAmplitude,
-            color: next.waveformColor
-        )
+        refreshPicture()
         appliedBlob = next
         refreshMetadata()
         guard isVisible, currentURL != nil else { return }
-        let columns = waveformColumnCount()
+        let columns = paneColumnCount()
         if overviewInputsChanged(previous, next) || columns != activeColumns {
             scheduleOverviewRestart()
         }
@@ -482,40 +502,101 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func applyOverview(_ snapshot: WaveformSnapshot) {
         overviewSnapshot = snapshot
+        refreshPicture()
+        onActivity()
+    }
+
+    private func refreshPicture() {
         content.setWaveform(
-            snapshot: snapshot,
+            snapshot: overviewSnapshot,
             amplitude: store.blob.waveformAmplitude,
             color: store.blob.waveformColor
         )
-        onActivity()
+        let settings = store.blob.spectrogram
+        let rate = playback.info?.sampleRate ?? 0
+        let nyquist = rate / 2
+        content.setSpectrogram(
+            columns: overviewSnapshot.spectrogram,
+            type: settings.type,
+            nFFT: settings.nFFT,
+            sampleRate: rate,
+            fmin: settings.fmin,
+            fmax: min(settings.fmax ?? nyquist, nyquist),
+            decibels: settings.decibelsEnabled,
+            dbFloor: settings.dbFloor,
+            dbRange: settings.dbRange
+        )
+        content.setProgress(visible: progressVisible, fraction: overviewSnapshot.progress)
+    }
+
+    private var currentEstimate: Double {
+        guard let info = playback.info, let url = currentURL else { return 0 }
+        return OverviewEstimate.seconds(
+            duration: info.duration,
+            sampleRate: info.sampleRate,
+            compressed: OverviewEstimate.isCompressed(url: url),
+            spectrogramDualVisible: store.blob.showSpectrogram && store.blob.spectrogramDual
+        )
     }
 
     private func refreshMetadata() {
         guard let info = playback.info, let url = currentURL else { return }
-        let showing = WaveformColumns.showing(
+        let waveformShowing = WaveformColumns.showing(
             channels: info.channels,
             dual: store.blob.waveformDual && store.blob.showWaveform
+        )
+        let spectrogramShowing = WaveformColumns.spectrogramShowing(
+            channels: info.channels,
+            dual: store.blob.spectrogramDual && store.blob.showSpectrogram
         )
         content.metadataLabel.stringValue = AudioFileKind.metadataLine(
             format: AudioFileKind.metadataLabel(for: url),
             sampleRate: info.sampleRate,
             channels: info.channels,
             duration: info.duration,
-            waveformShowing: showing
+            waveformShowing: waveformShowing,
+            spectrogramShowing: spectrogramShowing
         )
     }
 
-    private func waveformColumnCount() -> Int {
+    private func paneColumnCount() -> Int {
         content.layoutSubtreeIfNeeded()
-        return max(1, Int(content.waveformPane.bounds.width.rounded(.down)))
+        let width = store.blob.showWaveform ? content.waveformPane.bounds.width : content.spectrogramPane.bounds.width
+        return max(1, Int(width.rounded(.down)))
     }
 
     private func overviewInputsChanged(_ old: SettingsBlob, _ new: SettingsBlob) -> Bool {
-        old.showWaveform != new.showWaveform
-            || old.showSpectrogram != new.showSpectrogram
-            || old.waveformDual != new.waveformDual
-            || old.waveformAmplitude != new.waveformAmplitude
-            || old.spectrogram != new.spectrogram
+        overviewKey(for: old, columns: 0) != overviewKey(for: new, columns: 0)
+    }
+
+    private func overviewKey(for blob: SettingsBlob, columns: Int) -> OverviewKey {
+        OverviewKey(
+            path: currentURL?.path ?? "",
+            columns: columns,
+            waveformDual: blob.showWaveform ? blob.waveformDual : false,
+            computeWaveform: blob.showWaveform,
+            amplitude: blob.showWaveform ? blob.waveformAmplitude : .linear,
+            spectrogramDual: blob.showSpectrogram ? blob.spectrogramDual : false,
+            spectrogram: blob.showSpectrogram ? blob.spectrogram : nil
+        )
+    }
+
+    private func spectrogramJob() -> SpectrogramJob? {
+        guard store.blob.showSpectrogram else { return nil }
+        let settings = store.blob.spectrogram
+        return SpectrogramJob(
+            dual: store.blob.spectrogramDual,
+            type: settings.type,
+            nFFT: settings.nFFT,
+            hop: settings.hop,
+            window: settings.window,
+            nMels: settings.nMels,
+            fmin: settings.fmin,
+            fmax: settings.fmax,
+            decibels: settings.decibelsEnabled,
+            dbFloor: settings.dbFloor,
+            dbRange: settings.dbRange
+        )
     }
 
     private func scheduleOverviewRestart() {
@@ -530,23 +611,35 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func startOverviewNow() {
         restartOverview?.cancel()
-        guard isVisible, let url = currentURL, store.blob.showWaveform else {
+        guard isVisible, let url = currentURL else {
             cancelOverview()
             return
         }
-        let columns = waveformColumnCount()
-        let key = OverviewKey(
-            path: url.path,
-            columns: columns,
-            dual: store.blob.waveformDual,
-            amplitude: store.blob.waveformAmplitude,
-            showSpectrogram: store.blob.showSpectrogram,
-            spectrogram: store.blob.spectrogram
-        )
+        let showWaveform = store.blob.showWaveform
+        let showSpectrogram = store.blob.showSpectrogram
+        guard showWaveform || showSpectrogram else {
+            cancelOverview()
+            return
+        }
+        let job = spectrogramJob()
+        if showSpectrogram {
+            guard let job, let rate = playback.info?.sampleRate, job.isValid(sampleRate: rate) else {
+                cancelOverview()
+                return
+            }
+        }
+        let columns = paneColumnCount()
+        let key = overviewKey(for: store.blob, columns: columns)
         if key == activeOverview, overview.isActive { return }
         activeOverview = key
         activeColumns = columns
-        overview.start(url: url, columnCount: columns, dual: store.blob.waveformDual)
+        overview.start(
+            url: url,
+            columnCount: columns,
+            waveformDual: store.blob.waveformDual,
+            computeWaveform: showWaveform,
+            spectrogram: showSpectrogram ? job : nil
+        )
     }
 
     private func cancelOverview() {
@@ -556,14 +649,17 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         overview.cancel()
         overviewSnapshot = .empty
         content.clearWaveform()
+        content.clearSpectrogram()
+        content.setProgress(visible: false, fraction: 0)
     }
 }
 
 private struct OverviewKey: Equatable {
     var path: String
     var columns: Int
-    var dual: Bool
+    var waveformDual: Bool
+    var computeWaveform: Bool
     var amplitude: WaveformAmplitude
-    var showSpectrogram: Bool
-    var spectrogram: SpectrogramSettings
+    var spectrogramDual: Bool
+    var spectrogram: SpectrogramSettings?
 }

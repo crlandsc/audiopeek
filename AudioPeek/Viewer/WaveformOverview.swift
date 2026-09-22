@@ -15,6 +15,8 @@ struct WaveformSnapshot: Equatable, Sendable {
     var paused: Bool
     var finished: Bool
     var peakPasses: Int
+    var progress: Double
+    var spectrogram: [[[Float]]]
 
     static let empty = WaveformSnapshot(
         passID: 0,
@@ -24,7 +26,9 @@ struct WaveformSnapshot: Equatable, Sendable {
         running: false,
         paused: false,
         finished: false,
-        peakPasses: 0
+        peakPasses: 0,
+        progress: 0,
+        spectrogram: []
     )
 }
 
@@ -41,6 +45,11 @@ enum WaveformColumns {
         let lanes = laneCount(channels: channels, dual: dual)
         guard dual, channels > lanes else { return nil }
         return lanes
+    }
+
+    static func spectrogramShowing(channels: Int, dual: Bool) -> Int? {
+        guard dual, channels > 2 else { return nil }
+        return 2
     }
 
     static func decibelUnit(_ amplitude: Float) -> Float {
@@ -84,6 +93,16 @@ struct WaveformAccumulator {
             count += 1
         }
         return count
+    }
+
+    var progress: Double {
+        guard totalFrames > 0 else { return 0 }
+        return min(1, Double(framesSeen) / Double(totalFrames))
+    }
+
+    mutating func skip(frames: Int) {
+        let available = min(frames, max(0, totalFrames - framesSeen))
+        framesSeen += available
     }
 
     mutating func ingest(base: UnsafePointer<Float>, frames: Int) {
@@ -163,7 +182,9 @@ enum WaveformReader {
         dual: Bool,
         chunkFrames: Int,
         proceed: (WaveformReadPoint) -> Bool,
-        onChunk: (WaveformAccumulator) -> Void
+        onChunk: (WaveformAccumulator) -> Void,
+        onSamples: ((UnsafePointer<Float>, Int, Int, Double, Int) -> Void)? = nil,
+        computeWaveform: Bool = true
     ) -> WaveformReadResult {
         if !proceed(.beforeOpen) {
             return WaveformReadResult(stop: .cancelled, chunks: 0, opened: false, accumulator: nil)
@@ -218,7 +239,12 @@ enum WaveformReader {
                 return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
             }
             if frames == 0 { break }
-            accumulator.ingest(base: data, frames: Int(frames))
+            onSamples?(data, Int(frames), channels, description.sampleRate, Int(total))
+            if computeWaveform {
+                accumulator.ingest(base: data, frames: Int(frames))
+            } else {
+                accumulator.skip(frames: Int(frames))
+            }
             chunks += 1
             onChunk(accumulator)
             if accumulator.framesSeen >= accumulator.totalFrames { break }
@@ -311,7 +337,7 @@ final class WaveformOverview: @unchecked Sendable {
         }
     }
 
-    func start(url: URL, columnCount: Int, dual: Bool) {
+    func start(url: URL, columnCount: Int, waveformDual: Bool, computeWaveform: Bool, spectrogram: SpectrogramJob?) {
         let token: Int
         let published: WaveformSnapshot
         lock.lock()
@@ -325,24 +351,45 @@ final class WaveformOverview: @unchecked Sendable {
             running: true,
             paused: false,
             finished: false,
-            peakPasses: peakPasses
+            peakPasses: peakPasses,
+            progress: 0,
+            spectrogram: []
         )
         published = snapshot
         lock.unlock()
         wake.signal()
         deliver(published, token: token)
         queue.async { [weak self] in
-            self?.run(token: token, url: url, columnCount: max(columnCount, 1), dual: dual)
+            self?.run(
+                token: token,
+                url: url,
+                columnCount: max(columnCount, 1),
+                waveformDual: waveformDual,
+                computeWaveform: computeWaveform,
+                spectrogram: spectrogram
+            )
         }
     }
 
-    private func run(token: Int, url: URL, columnCount: Int, dual: Bool) {
+    private final class SpectrogramBox {
+        var engine: SpectrogramAccumulator?
+    }
+
+    private func run(
+        token: Int,
+        url: URL,
+        columnCount: Int,
+        waveformDual: Bool,
+        computeWaveform: Bool,
+        spectrogram: SpectrogramJob?
+    ) {
         enterPass()
         defer { leavePass() }
+        let box = SpectrogramBox()
         let result = WaveformReader.read(
             url: url,
             columnCount: columnCount,
-            dual: dual,
+            dual: waveformDual,
             chunkFrames: 8192,
             proceed: { [weak self] point in
                 guard let self else { return false }
@@ -354,15 +401,37 @@ final class WaveformOverview: @unchecked Sendable {
                 }
             },
             onChunk: { [weak self] accumulator in
-                self?.publish(accumulator, token: token, finished: false)
-            }
+                self?.publish(
+                    accumulator,
+                    spectrogram: box.engine,
+                    token: token,
+                    finished: false,
+                    includeWaveform: computeWaveform
+                )
+            },
+            onSamples: { base, frames, channels, sampleRate, totalFrames in
+                if box.engine == nil, let spectrogram {
+                    box.engine = SpectrogramAccumulator(
+                        job: spectrogram,
+                        sampleRate: sampleRate,
+                        channels: channels,
+                        totalFrames: totalFrames,
+                        columnCount: columnCount
+                    )
+                }
+                box.engine?.ingest(base: base, frames: frames, channels: channels)
+            },
+            computeWaveform: computeWaveform
         )
         guard isCurrent(token) else { return }
+        if result.stop == .finished {
+            box.engine?.finish()
+        }
         switch result.stop {
         case .finished:
-            publish(result.accumulator, token: token, finished: true)
+            publish(result.accumulator, spectrogram: box.engine, token: token, finished: true, includeWaveform: computeWaveform)
         case .failed:
-            publish(nil, token: token, finished: true)
+            publish(nil, spectrogram: box.engine, token: token, finished: true, includeWaveform: computeWaveform)
         case .cancelled:
             break
         }
@@ -396,7 +465,15 @@ final class WaveformOverview: @unchecked Sendable {
         }
     }
 
-    private func publish(_ accumulator: WaveformAccumulator?, token: Int, finished: Bool) {
+    private func publish(
+        _ accumulator: WaveformAccumulator?,
+        spectrogram: SpectrogramAccumulator?,
+        token: Int,
+        finished: Bool,
+        includeWaveform: Bool
+    ) {
+        let painted = spectrogram?.paintedColumns() ?? []
+        let progress = accumulator?.progress ?? (finished ? 1 : 0)
         lock.lock()
         guard token == generation else {
             lock.unlock()
@@ -404,9 +481,16 @@ final class WaveformOverview: @unchecked Sendable {
         }
         let filled = accumulator?.completedColumns ?? snapshot.filled
         snapshot.passID = token
-        snapshot.lanes = accumulator?.columns(through: filled) ?? snapshot.lanes
-        snapshot.columnCount = accumulator?.columnCount ?? snapshot.columnCount
-        snapshot.filled = filled
+        if let accumulator, includeWaveform {
+            snapshot.lanes = accumulator.columns(through: filled)
+            snapshot.columnCount = accumulator.columnCount
+            snapshot.filled = filled
+        } else if !includeWaveform {
+            snapshot.lanes = []
+            snapshot.filled = 0
+        }
+        snapshot.progress = progress
+        snapshot.spectrogram = painted
         snapshot.running = !finished
         snapshot.paused = false
         snapshot.finished = finished

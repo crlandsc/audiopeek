@@ -42,6 +42,7 @@ final class SlipContentView: NSView {
     let divider = NSView()
     let waveformPlayhead = NSView()
     let spectrogramPlayhead = NSView()
+    let progressFill = NSView()
 
     var onPlay: () -> Void = {}
     var onVolume: (Double) -> Void = { _ in }
@@ -56,6 +57,8 @@ final class SlipContentView: NSView {
     private(set) var playClicks = 0
     private var draggingSplit = false
     private var palette = SlipPalette.current(NSApp.effectiveAppearance)
+    private var showProgress = false
+    private var progressFraction = 0.0
 
     override var isFlipped: Bool { true }
 
@@ -104,8 +107,11 @@ final class SlipContentView: NSView {
         }
         waveformPlayhead.setAccessibilityIdentifier("slip.playhead.waveform")
         spectrogramPlayhead.setAccessibilityIdentifier("slip.playhead.spectrogram")
+        progressFill.wantsLayer = true
+        progressFill.isHidden = true
+        progressFill.setAccessibilityIdentifier("slip.progress")
 
-        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, gearButton, waveformPane, spectrogramPane, divider] {
+        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, gearButton, waveformPane, spectrogramPane, divider, progressFill] {
             addSubview(view)
         }
         waveformPane.addSubview(waveformPlayhead)
@@ -167,8 +173,16 @@ final class SlipContentView: NSView {
         let metaWidth = min(metadataLabel.intrinsicContentSize.width, max(0, volumeX - pad - button - gap * 3 - 80))
         let nameX = pad + button + gap
         let nameWidth = max(40, volumeX - gap - metaWidth - gap - nameX)
-        filenameLabel.frame = NSRect(x: nameX, y: 0, width: nameWidth, height: headerHeight)
-        metadataLabel.frame = NSRect(x: nameX + nameWidth + gap, y: 0, width: metaWidth, height: headerHeight)
+        let labelHeight = headerHeight - 2
+        filenameLabel.frame = NSRect(x: nameX, y: 0, width: nameWidth, height: labelHeight)
+        metadataLabel.frame = NSRect(x: nameX + nameWidth + gap, y: 0, width: metaWidth, height: labelHeight)
+        progressFill.isHidden = !showProgress
+        progressFill.frame = NSRect(
+            x: 0,
+            y: headerHeight - 2,
+            width: bounds.width * progressFraction,
+            height: 2
+        )
 
         waveformPane.isHidden = !showWaveform
         spectrogramPane.isHidden = !showSpectrogram
@@ -305,7 +319,15 @@ final class SlipContentView: NSView {
         spectrogramPlayhead.wantsLayer = true
         waveformPlayhead.layer?.backgroundColor = palette.head.cgColor
         spectrogramPlayhead.layer?.backgroundColor = palette.head.cgColor
+        progressFill.layer?.backgroundColor = palette.ink.cgColor
         waveformPane.needsDisplay = true
+        spectrogramPane.needsDisplay = true
+    }
+
+    func setProgress(visible: Bool, fraction: Double) {
+        showProgress = visible
+        progressFraction = min(max(fraction, 0), 1)
+        needsLayout = true
     }
 
     func setWaveform(snapshot: WaveformSnapshot, amplitude: WaveformAmplitude, color: WaveformColor) {
@@ -316,6 +338,34 @@ final class SlipContentView: NSView {
         waveformPane.clearWaveform()
     }
 
+    func setSpectrogram(
+        columns: [[[Float]]],
+        type: SpectrogramType,
+        nFFT: Int,
+        sampleRate: Double,
+        fmin: Double,
+        fmax: Double,
+        decibels: Bool,
+        dbFloor: Double,
+        dbRange: Double
+    ) {
+        spectrogramPane.setSpectrogram(
+            columns: columns,
+            type: type,
+            nFFT: nFFT,
+            sampleRate: sampleRate,
+            fmin: fmin,
+            fmax: fmax,
+            decibels: decibels,
+            dbFloor: dbFloor,
+            dbRange: dbRange
+        )
+    }
+
+    func clearSpectrogram() {
+        spectrogramPane.clearSpectrogram()
+    }
+
 }
 
 final class SlipPaneView: NSView {
@@ -324,6 +374,7 @@ final class SlipPaneView: NSView {
     private var columnCount = 0
     private var amplitude = WaveformAmplitude.linear
     private var waveformColor = WaveformColor.systemBlue
+    private var spectrogramImages: [CGImage] = []
 
     override var isFlipped: Bool { true }
 
@@ -341,7 +392,41 @@ final class SlipPaneView: NSView {
         needsDisplay = true
     }
 
+    func setSpectrogram(
+        columns: [[[Float]]],
+        type: SpectrogramType,
+        nFFT: Int,
+        sampleRate: Double,
+        fmin: Double,
+        fmax: Double,
+        decibels: Bool,
+        dbFloor: Double,
+        dbRange: Double
+    ) {
+        spectrogramImages = SpectrogramImage.make(
+            columns: columns,
+            type: type,
+            nFFT: nFFT,
+            sampleRate: sampleRate,
+            fmin: fmin,
+            fmax: fmax,
+            decibels: decibels,
+            dbFloor: dbFloor,
+            dbRange: dbRange
+        )
+        needsDisplay = true
+    }
+
+    func clearSpectrogram() {
+        spectrogramImages = []
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        if !spectrogramImages.isEmpty {
+            drawSpectrogram()
+            return
+        }
         guard columnCount > 0, let lane = lanes.first, !lane.isEmpty else { return }
         let color = resolvedColor()
         let gap: CGFloat = lanes.count > 1 ? 3 : 0
@@ -374,6 +459,26 @@ final class SlipPaneView: NSView {
                 color.withAlphaComponent(0.22).setStroke()
                 mid.stroke()
             }
+        }
+    }
+
+    private func drawSpectrogram() {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let gap: CGFloat = spectrogramImages.count > 1 ? 3 : 0
+        let laneHeight = max(1, (bounds.height - gap * CGFloat(max(spectrogramImages.count - 1, 0))) / CGFloat(spectrogramImages.count))
+        for (index, image) in spectrogramImages.enumerated() {
+            let rect = CGRect(
+                x: 0,
+                y: CGFloat(index) * (laneHeight + gap),
+                width: bounds.width,
+                height: laneHeight
+            )
+            ctx.saveGState()
+            ctx.translateBy(x: rect.minX, y: rect.minY + rect.height)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.interpolationQuality = .none
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+            ctx.restoreGState()
         }
     }
 
@@ -420,5 +525,175 @@ extension SlipContentView {
 
     @objc private func gearPressed() {
         onGear()
+    }
+}
+
+private enum MagmaColor {
+    private static let stops: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.00146, 0.00047, 0.01387),
+        (0.02815, 0.02115, 0.13640),
+        (0.11300, 0.04180, 0.31400),
+        (0.23200, 0.05900, 0.46800),
+        (0.37000, 0.08200, 0.54100),
+        (0.51600, 0.10500, 0.52800),
+        (0.66500, 0.15400, 0.48600),
+        (0.79600, 0.23400, 0.42600),
+        (0.89200, 0.34600, 0.35600),
+        (0.95200, 0.48200, 0.31800),
+        (0.98200, 0.62200, 0.35200),
+        (0.99400, 0.76400, 0.46800),
+        (0.99100, 0.89200, 0.64600),
+        (0.98705, 0.99144, 0.74950),
+    ]
+
+    static func components(_ unit: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
+        let clamped = min(1, max(0, unit))
+        let scaled = clamped * CGFloat(stops.count - 1)
+        let index = min(stops.count - 2, Int(scaled))
+        let fraction = scaled - CGFloat(index)
+        let start = stops[index]
+        let end = stops[index + 1]
+        return (
+            start.0 + (end.0 - start.0) * fraction,
+            start.1 + (end.1 - start.1) * fraction,
+            start.2 + (end.2 - start.2) * fraction
+        )
+    }
+}
+
+private enum SpectrogramImage {
+    static func make(
+        columns: [[[Float]]],
+        type: SpectrogramType,
+        nFFT: Int,
+        sampleRate: Double,
+        fmin: Double,
+        fmax: Double,
+        decibels: Bool,
+        dbFloor: Double,
+        dbRange: Double
+    ) -> [CGImage] {
+        guard let first = columns.first, let bins = first.first?.count, bins > 0 else { return [] }
+        let width = first.count
+        guard width > 0 else { return [] }
+        var peak: Float = 0
+        if !decibels {
+            for lane in columns {
+                for column in lane {
+                    for value in column where value > peak {
+                        peak = value
+                    }
+                }
+            }
+        }
+        return columns.compactMap { lane in
+            guard lane.count == width, lane.first?.count == bins else { return nil }
+            return image(
+                lane: lane,
+                bins: bins,
+                type: type,
+                nFFT: nFFT,
+                sampleRate: sampleRate,
+                fmin: fmin,
+                fmax: fmax,
+                decibels: decibels,
+                dbFloor: dbFloor,
+                dbRange: dbRange,
+                peak: peak
+            )
+        }
+    }
+
+    private static func image(
+        lane: [[Float]],
+        bins: Int,
+        type: SpectrogramType,
+        nFFT: Int,
+        sampleRate: Double,
+        fmin: Double,
+        fmax: Double,
+        decibels: Bool,
+        dbFloor: Double,
+        dbRange: Double,
+        peak: Float
+    ) -> CGImage? {
+        let width = lane.count
+        let height = bins
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for row in 0..<height {
+            let bin = binIndex(
+                rowFromTop: row,
+                rows: height,
+                bins: bins,
+                type: type,
+                nFFT: nFFT,
+                sampleRate: sampleRate,
+                fmin: fmin,
+                fmax: fmax
+            )
+            for column in 0..<width {
+                let power = bin < lane[column].count ? lane[column][bin] : 0
+                let unit = unit(
+                    power: power,
+                    decibels: decibels,
+                    dbFloor: dbFloor,
+                    dbRange: dbRange,
+                    peak: peak
+                )
+                let color = MagmaColor.components(unit)
+                let offset = (row * width + column) * 4
+                pixels[offset] = UInt8(color.0 * 255)
+                pixels[offset + 1] = UInt8(color.1 * 255)
+                pixels[offset + 2] = UInt8(color.2 * 255)
+                pixels[offset + 3] = 255
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: space,
+            bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
+    }
+
+    private static func unit(power: Float, decibels: Bool, dbFloor: Double, dbRange: Double, peak: Float) -> CGFloat {
+        if decibels {
+            guard dbRange != 0 else { return 0 }
+            let db = power > 0 ? 10 * log10(Double(power)) : dbFloor
+            return CGFloat(min(1, max(0, (db - dbFloor) / dbRange)))
+        }
+        guard peak > 0 else { return 0 }
+        return CGFloat(min(1, max(0, power / peak)))
+    }
+
+    private static func binIndex(
+        rowFromTop row: Int,
+        rows: Int,
+        bins: Int,
+        type: SpectrogramType,
+        nFFT: Int,
+        sampleRate: Double,
+        fmin: Double,
+        fmax: Double
+    ) -> Int {
+        if type == .logFrequency, sampleRate > 0, nFFT > 1, fmax > 0 {
+            let fromBottom = 1 - (Double(row) + 0.5) / Double(max(rows, 1))
+            let low = max(fmin, sampleRate / Double(nFFT))
+            let high = max(fmax, low)
+            guard low > 0, high > low else { return min(bins - 1, max(0, bins - 1 - row)) }
+            let freq = exp(log(low) + (log(high) - log(low)) * fromBottom)
+            let bin = Int((freq * Double(nFFT) / sampleRate).rounded())
+            return min(bins - 1, max(0, bin))
+        }
+        return min(bins - 1, max(0, bins - 1 - row))
     }
 }

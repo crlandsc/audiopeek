@@ -1,17 +1,17 @@
 import Foundation
 
-enum WaveformAmplitude: String, Codable, Equatable {
+enum WaveformAmplitude: String, Codable, Equatable, Sendable {
     case linear
     case decibels
 }
 
-enum SpectrogramType: String, Codable, Equatable {
+enum SpectrogramType: String, Codable, Equatable, Sendable {
     case linear
     case logFrequency
     case mel
 }
 
-enum FFTWindow: String, Codable, Equatable {
+enum FFTWindow: String, Codable, Equatable, Sendable {
     case hann
     case hamming
     case blackman

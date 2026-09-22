@@ -53,6 +53,15 @@ final class WaveformOverviewTests: XCTestCase {
             duration: 1
         )
         XCTAssertEqual(mixed, "WAV · 44.1 kHz · 16 ch · 0:01")
+        let both = AudioFileKind.metadataLine(
+            format: "WAV",
+            sampleRate: 44100,
+            channels: 16,
+            duration: 1,
+            waveformShowing: 8,
+            spectrogramShowing: 2
+        )
+        XCTAssertEqual(both, "WAV · 44.1 kHz · 16 ch · showing 8 · 16 ch · showing 2 · 0:01")
     }
 
     func testDecibelScaleRunsFromTheFloorToFullScale() {
