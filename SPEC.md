@@ -144,7 +144,7 @@ Verification:
 
 ## What it is
 
-AudioPeek is a personal macOS tool being open sourced. It shows a configurable waveform and spectrogram, and plays the audio, for the file selected in Finder. A custom hotkey opens it. Spacebar stays Apple's player.
+AudioPeek is a personal macOS tool being open sourced. It shows a configurable waveform and spectrogram, and plays the audio, for the file selected in Finder. A custom hotkey opens it. While the preview is open, space toggles play and Finder's arrow keys still move the selection.
 
 Version 1 is a written product with one job: view and play. It is a quick Finder preview, not an analysis tool. People who want zoom already have better tools.
 
@@ -180,7 +180,7 @@ The Carbon hotkey handler returns immediately. It does not wait on Finder, open,
 
 First show is 860 by 500 points, centered on the screen of the front Finder window. After that, remember the frame in the settings blob. A width change is a column-grid change: debounce the drag (mouse-up, or about 200 ms after the last change), then restart the overview once. Split height does not restart the pass.
 
-The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. No pane labels. No separate transport bar. Header order, as drawn for Slip in the prototype: play/pause, filename, compact metadata, volume slider, subtle settings gear. Metadata is format, sample rate, channel count, and duration. The gear opens the settings window.
+The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. No pane labels. No separate transport bar. Header order, as drawn: play/pause, filename, compact metadata, volume slider, loop, subtle settings gear. Metadata sits against the volume control and the filename truncates first. The gear opens the settings window.
 
 Both panes start visible, split 50/50. The split is draggable and remembered. Hiding a pane gives the other the leftover height.
 
@@ -206,9 +206,9 @@ Sources: [Decide the app architecture and how the pieces fit](https://linear.app
 
 Autoplay when the overlay opens on exactly one supported audio file, and when Finder moves onto a new one. The playhead starts at 0. Playback and the overview start together. Playback continues while the picture fills or recomputes. Do not delay play until the picture finishes.
 
-The overlay has a mouse play/pause control. Space still belongs to Finder and to Apple's Quick Look.
+The overlay has a mouse play/pause control. While it is visible, bare space toggles play through a Carbon hotkey. The panel does not become key, so Finder's arrow keys still change the selection. That space hotkey is removed when the panel hides, and it is not the viewer hotkey.
 
-Click a visible waveform or spectrogram to seek. The playhead follows playback. If no pane is shown, seek does nothing. No zoom and no loop. At the end, pause with the playhead at the end. Pressing play from there starts at 0.
+Click or drag a visible waveform or spectrogram to seek. While the mouse is down, playback stays silent and the playhead follows the pointer. On release, playback resumes only if it was playing before the drag. A paused file stays paused. Dragging the header moves the window. If no pane is shown, seek does nothing. No zoom. Loop is a header toggle, off by default. With loop off, the end pauses with the playhead at the end, and pressing play from there starts at 0. With loop on, the end starts again at 0 when the machine-load gate allows it.
 
 Playback uses the file's normal Core Audio output mix. The 8-lane and 2-channel caps apply to the picture only. Playback does not change system volume or the default output device.
 
@@ -302,7 +302,7 @@ Sources: [Decide how waveform and spectrogram DSP is checked for correctness](ht
 
 ## Long files and published limits
 
-Open immediately. Fill the header from file metadata. Start autoplay from the stream. Paint the waveform and spectrogram as they complete, left to right. Playback continues while that picture fills or recomputes. Do not delay play until the picture finishes.
+Open immediately. Fill the header from file metadata. Start autoplay from the stream. Paint the waveform and spectrogram as they complete, left to right. Playback continues while that picture fills or recomputes. Do not delay play until the picture finishes. Files longer than 30 seconds use a coarser picture unless Full detail is on.
 
 A selection change discards the in-flight pass, including a pass that pressure had paused. A debounced redraw that changes the columns does the same. Pressure does not discard it: pause at the next chunk, keep columns already painted, and continue that same pass when headroom returns (see Machine load).
 
@@ -367,7 +367,7 @@ Sources: [Decide whether version 1 ships a Quick Look extension for types Apple 
 
 Version 1 asks for one privacy grant: Automation for Finder, the first time a hotkey reads the selection.
 
-**Hotkey.** Carbon `RegisterEventHotKey`. The handler returns immediately. It does not wait on Finder, open, or decode. No Accessibility and no Input Monitoring. Factory combo is Option-Space. The same combo may be registered by other processes; rebind is the way out. Do not register a bare spacebar hotkey. Do not use `NSEvent` global monitors or a `CGEvent` tap in version 1.
+**Hotkey.** Carbon `RegisterEventHotKey`. The handler returns immediately. It does not wait on Finder, open, or decode. No Accessibility and no Input Monitoring. Factory combo is Option-Space. The same combo may be registered by other processes; rebind is the way out. Do not register bare space as the viewer hotkey. While the panel is visible, a separate Carbon hotkey may take bare space for play/pause, and it is unregistered when the panel hides. Do not use `NSEvent` global monitors or a `CGEvent` tap in version 1.
 
 **Selection.** Apple Events to Finder's `selection`, via Scripting Bridge or a compiled Apple Event. Do not compile an `NSAppleScript` on every hotkey. Do not walk Finder's UI with Accessibility. If Automation is denied or the event fails, stop retrying and say so in the existing settings window (enable AudioPeek for Finder). Offer an Open Automation button that opens System Settings > Privacy & Security > Automation. Do not fall through to Accessibility. Info.plist includes `NSAppleEventsUsageDescription` so the prompt can appear. The app is not sandboxed. Version 1 leaves Hardened Runtime off. Do not turn it on in version 1. With Hardened Runtime on, Apple Events fail quietly unless `com.apple.security.automation.apple-events` is set.
 

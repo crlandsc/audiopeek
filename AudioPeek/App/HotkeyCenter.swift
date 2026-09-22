@@ -4,19 +4,23 @@ import Foundation
 final class HotkeyCenter {
     var onViewer: () -> Void = {}
     var onEscape: () -> Void = {}
+    var onPreviewSpace: () -> Void = {}
 
     private(set) var carbonDeliveries = 0
     private(set) var viewerStatus: OSStatus = 1
     private(set) var escapeRegistered = false
+    private(set) var previewSpaceRegistered = false
     private(set) var viewerCombo: HotkeyCombo?
     private(set) var lastProbeStatus: OSStatus = 0
     private var viewerRef: EventHotKeyRef?
     private var escapeRef: EventHotKeyRef?
+    private var previewSpaceRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
     private var installed = false
 
     private let viewerID = EventHotKeyID(signature: HotkeyCenter.four("APk1"), id: 1)
     private let escapeID = EventHotKeyID(signature: HotkeyCenter.four("APk2"), id: 2)
+    private let previewSpaceID = EventHotKeyID(signature: HotkeyCenter.four("APk3"), id: 3)
 
     func installHandler() {
         guard !installed else { return }
@@ -112,6 +116,29 @@ final class HotkeyCenter {
         escapeRegistered = false
     }
 
+    func setPreviewSpaceEnabled(_ enabled: Bool) {
+        if enabled {
+            guard previewSpaceRef == nil else {
+                previewSpaceRegistered = true
+                return
+            }
+            var ref: EventHotKeyRef?
+            let status = RegisterEventHotKey(49, 0, previewSpaceID, GetApplicationEventTarget(), 0, &ref)
+            if status == noErr {
+                previewSpaceRef = ref
+                previewSpaceRegistered = true
+            } else {
+                previewSpaceRegistered = false
+            }
+            return
+        }
+        if let previewSpaceRef {
+            UnregisterEventHotKey(previewSpaceRef)
+            self.previewSpaceRef = nil
+        }
+        previewSpaceRegistered = false
+    }
+
     func probe(_ combo: HotkeyCombo) -> OSStatus {
         if combo.isBareSpace || Self.isUnmodifiedArrow(combo) {
             lastProbeStatus = OSStatus(paramErr)
@@ -142,6 +169,10 @@ final class HotkeyCenter {
         post(id: escapeID)
     }
 
+    func postPreviewSpaceEvent() {
+        post(id: previewSpaceID)
+    }
+
     private func post(id: EventHotKeyID) {
         var event: EventRef?
         let created = CreateEvent(
@@ -170,6 +201,8 @@ final class HotkeyCenter {
         let deliver = {
             if id == self.escapeID.id {
                 self.onEscape()
+            } else if id == self.previewSpaceID.id {
+                self.onPreviewSpace()
             } else if id == self.viewerID.id {
                 self.onViewer()
             }

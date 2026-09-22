@@ -17,8 +17,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private let overview = WaveformOverview()
     private var overviewSnapshot = WaveformSnapshot.empty
     private var appliedBlob = SettingsBlob.factory
-    private var activeOverview: OverviewKey?
+    private var activeWave: WavePictureKey?
+    private var activeSpec: SpecPictureKey?
     private var activeColumns = 0
+    private var retainedLanes: [[WaveformColumn]] = []
+    private var retainedSpectrogram: [[[Float]]] = []
     private var restartOverview: DispatchWorkItem?
     private var panel: SlipWindow?
     private var pollTimer: Timer?
@@ -46,20 +49,43 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             self?.store.setVolume(value)
             self?.playback.setGain(self?.store.effectiveVolume ?? value)
         }
-        content.onSeek = { [weak self] _, fraction in
-            self?.playback.seek(toFraction: fraction)
-            self?.syncPlayhead()
+        content.onScrub = { [weak self] _, fraction, phase in
+            guard let self else { return }
+            switch phase {
+            case .began:
+                self.playback.beginScrub(toFraction: fraction)
+            case .moved:
+                self.playback.moveScrub(toFraction: fraction)
+            case .ended:
+                self.playback.endScrub(toFraction: fraction)
+            }
+            self.syncPlayhead()
         }
         playback.onChange = { [weak self] in
             self?.syncPlayhead()
             self?.onActivity()
         }
         playback.setGain(store.effectiveVolume)
+        playback.loopIsOn = { [weak self] in
+            self?.store.blob.loopEnabled ?? false
+        }
+        playback.playbackAllowed = { [weak self] in
+            guard let self else { return false }
+            return self.gate.allowsPlayback(self.gate.sample())
+        }
+        content.onLoop = { [weak self] enabled in
+            self?.store.update { $0.loopEnabled = enabled }
+            self?.content.setLoop(enabled)
+        }
         content.onGear = { [weak self] in
             self?.onOpenSettings()
         }
         content.onSplit = { [weak self] fraction in
             self?.store.update { $0.splitFraction = fraction }
+        }
+        content.onResizeEnd = { [weak self] in
+            self?.scheduleFrameSave()
+            self?.restartIfColumnsMoved()
         }
         overview.onSnapshot = { [weak self] snapshot in
             self?.applyOverview(snapshot)
@@ -79,6 +105,26 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var metadata: String { content.metadataLabel.stringValue }
 
     var headerOrder: [String] { content.headerOrder }
+
+    var movableByBackground: Bool { panel?.isMovableByWindowBackground ?? false }
+
+    var filenameToolTip: String { content.filenameLabel.toolTip ?? "" }
+
+    var metadataToolTip: String { content.metadataLabel.toolTip ?? "" }
+
+    var metadataMaxX: Double { Double(content.metadataLabel.frame.maxX) }
+
+    var volumeMinX: Double { Double(content.volumeSlider.frame.minX) }
+
+    var loopMinX: Double { Double(content.loopButton.frame.minX) }
+
+    var gearMinX: Double { Double(content.gearButton.frame.minX) }
+
+    var filenameWidth: Double { Double(content.filenameLabel.frame.width) }
+
+    func hitKind(at point: NSPoint) -> String {
+        content.hitKind(at: point)
+    }
 
     var playClicks: Int { content.playClicks }
 
@@ -141,6 +187,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.playButton.performClick(nil)
     }
 
+    func previewSpace() {
+        guard isVisible else { return }
+        togglePlay()
+    }
+
     var frame: NSRect { panel?.frame ?? .zero }
 
     func viewerHotkey() {
@@ -165,6 +216,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             split: next.splitFraction,
             volume: store.effectiveVolume
         )
+        content.setLoop(next.loopEnabled)
         playback.setGain(store.effectiveVolume)
         if let panel, let stored = next.windowFrame {
             let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
@@ -180,8 +232,15 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         appliedBlob = next
         refreshMetadata()
         guard isVisible, currentURL != nil else { return }
+        if pictureChanged(previous, next) || abs(paneColumnCount() - activeColumns) > 4 {
+            scheduleOverviewRestart()
+        }
+    }
+
+    private func restartIfColumnsMoved() {
+        guard isVisible, currentURL != nil else { return }
         let columns = paneColumnCount()
-        if overviewInputsChanged(previous, next) || columns != activeColumns {
+        if abs(columns - activeColumns) > 4 {
             scheduleOverviewRestart()
         }
     }
@@ -222,7 +281,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         stopPlayback()
         cancelOverview()
         hotkey.setEscapeEnabled(false)
-        panel?.orderOut(nil)
+        hotkey.setPreviewSpaceEnabled(false)
+        if let panel {
+            panel.orderOut(nil)
+        }
         onActivity()
     }
 
@@ -327,6 +389,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         if !window.isVisible {
             window.orderFrontRegardless()
             hotkey.setEscapeEnabled(true)
+            hotkey.setPreviewSpaceEnabled(true)
             startPoll()
         }
         if changed || playback.duration == 0 {
@@ -385,9 +448,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             gateTimer = timer
         }
         if playheadTimer == nil {
-            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, self.playback.isPlaying else { return }
+                    guard let self else { return }
+                    self.content.advanceReveal()
+                    guard self.playback.isPlaying else { return }
                     self.syncPlayhead()
                 }
             }
@@ -414,7 +479,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.isFloatingPanel = true
         window.level = .floating
         window.hidesOnDeactivate = false
@@ -521,13 +586,66 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     func windowDidEndLiveResize(_ notification: Notification) {
         scheduleFrameSave()
-        scheduleOverviewRestart()
+        restartIfColumnsMoved()
     }
 
     private func applyOverview(_ snapshot: WaveformSnapshot) {
-        overviewSnapshot = snapshot
-        refreshPicture()
+        var merged = snapshot
+        if merged.lanes.isEmpty {
+            merged.lanes = retainedLanes
+        } else {
+            retainedLanes = merged.lanes
+        }
+        if merged.spectrogram.isEmpty {
+            merged.spectrogram = retainedSpectrogram
+        } else {
+            retainedSpectrogram = merged.spectrogram
+        }
+        overviewSnapshot = merged
+        content.setWaveform(
+            snapshot: merged,
+            amplitude: store.blob.waveformAmplitude,
+            color: store.blob.waveformColor
+        )
+        if shouldRefreshSpectrogram(merged) {
+            paintSpectrogram()
+        }
+        content.setProgress(visible: progressVisible, fraction: merged.progress)
         onActivity()
+    }
+
+    private var lastSpectrogramPaint = Date.distantPast
+    private var lastSpectrogramColumns = -1
+
+    private func shouldRefreshSpectrogram(_ snapshot: WaveformSnapshot) -> Bool {
+        let count = snapshot.spectrogram.first?.count ?? 0
+        if snapshot.finished || count != lastSpectrogramColumns {
+            let elapsed = Date().timeIntervalSince(lastSpectrogramPaint)
+            if snapshot.finished || elapsed >= 0.1 || lastSpectrogramColumns < 0 {
+                lastSpectrogramColumns = count
+                lastSpectrogramPaint = Date()
+                return true
+            }
+        }
+        return false
+    }
+
+    private func paintSpectrogram() {
+        let settings = store.blob.spectrogram
+        let rate = playback.info?.sampleRate ?? 0
+        let nyquist = rate / 2
+        content.setSpectrogram(
+            columns: overviewSnapshot.spectrogram,
+            totalColumns: max(overviewSnapshot.columnCount, overviewSnapshot.spectrogram.first?.count ?? 0),
+            type: settings.type,
+            nFFT: settings.nFFT,
+            sampleRate: rate,
+            fmin: settings.fmin,
+            fmax: min(settings.fmax ?? nyquist, nyquist),
+            decibels: settings.decibelsEnabled,
+            dbFloor: settings.dbFloor,
+            dbRange: settings.dbRange
+        )
     }
 
     private func refreshPicture() {
@@ -541,6 +659,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         let nyquist = rate / 2
         content.setSpectrogram(
             columns: overviewSnapshot.spectrogram,
+            totalColumns: max(overviewSnapshot.columnCount, overviewSnapshot.spectrogram.first?.count ?? 0),
             type: settings.type,
             nFFT: settings.nFFT,
             sampleRate: rate,
@@ -581,6 +700,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             waveformShowing: waveformShowing,
             spectrogramShowing: spectrogramShowing
         )
+        content.needsLayout = true
     }
 
     private func paneColumnCount() -> Int {
@@ -589,19 +709,36 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         return max(1, Int(width.rounded(.down)))
     }
 
-    private func overviewInputsChanged(_ old: SettingsBlob, _ new: SettingsBlob) -> Bool {
-        overviewKey(for: old, columns: 0) != overviewKey(for: new, columns: 0)
+    private func pictureChanged(_ old: SettingsBlob, _ new: SettingsBlob) -> Bool {
+        waveKey(for: old, columns: 0) != waveKey(for: new, columns: 0)
+            || specKey(for: old, columns: 0) != specKey(for: new, columns: 0)
     }
 
-    private func overviewKey(for blob: SettingsBlob, columns: Int) -> OverviewKey {
-        OverviewKey(
+    private func waveKey(for blob: SettingsBlob, columns: Int) -> WavePictureKey {
+        WavePictureKey(
             path: currentURL?.path ?? "",
             columns: columns,
-            waveformDual: blob.showWaveform ? blob.waveformDual : false,
-            computeWaveform: blob.showWaveform,
-            amplitude: blob.showWaveform ? blob.waveformAmplitude : .linear,
-            spectrogramDual: blob.showSpectrogram ? blob.spectrogramDual : false,
-            spectrogram: blob.showSpectrogram ? blob.spectrogram : nil
+        dual: blob.waveformDual,
+        shown: blob.showWaveform,
+        fullDetail: blob.staticOverview
+    )
+    }
+
+    private func specKey(for blob: SettingsBlob, columns: Int) -> SpecPictureKey {
+        let settings = blob.spectrogram
+        return SpecPictureKey(
+            path: currentURL?.path ?? "",
+            columns: columns,
+            dual: blob.spectrogramDual,
+            shown: blob.showSpectrogram,
+            type: settings.type,
+            nFFT: settings.nFFT,
+            hop: settings.hop,
+            window: settings.window,
+            nMels: settings.nMels,
+            fmin: settings.fmin,
+            fmax: settings.fmax,
+            fullDetail: blob.staticOverview
         )
     }
 
@@ -653,23 +790,47 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             }
         }
         let columns = paneColumnCount()
-        let key = overviewKey(for: store.blob, columns: columns)
-        if key == activeOverview, overview.isActive { return }
-        activeOverview = key
+        let wave = waveKey(for: store.blob, columns: columns)
+        let spec = specKey(for: store.blob, columns: columns)
+        if wave.path != activeWave?.path {
+            retainedLanes = []
+            retainedSpectrogram = []
+        }
+        let waveDirty = showWaveform && wave != activeWave
+        let specDirty = showSpectrogram && spec != activeSpec
+        activeWave = wave
+        activeSpec = spec
         activeColumns = columns
+        if !waveDirty && !specDirty { return }
+        if waveDirty { retainedLanes = [] }
+        if specDirty { retainedSpectrogram = [] }
+        let inspect = OverviewDetail.inspectFrames(
+            duration: playback.duration,
+            fullDetail: store.blob.staticOverview,
+            nFFT: store.blob.spectrogram.nFFT
+        )
+        var pictured = specDirty ? job : nil
+        if inspect > 0, var editable = pictured {
+            editable.hop = min(editable.nFFT, max(editable.hop, inspect))
+            pictured = editable
+        }
         overview.start(
             url: url,
             columnCount: columns,
             waveformDual: store.blob.waveformDual,
-            computeWaveform: showWaveform,
-            spectrogram: showSpectrogram ? job : nil
+            computeWaveform: waveDirty,
+            spectrogram: pictured,
+            inspectPerColumn: inspect
         )
     }
 
     private func cancelOverview() {
         restartOverview?.cancel()
-        activeOverview = nil
+        activeWave = nil
+        activeSpec = nil
         activeColumns = 0
+        retainedLanes = []
+        retainedSpectrogram = []
         overview.cancel()
         overviewSnapshot = .empty
         content.clearWaveform()
@@ -678,12 +839,25 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 }
 
-private struct OverviewKey: Equatable {
+private struct WavePictureKey: Equatable {
     var path: String
     var columns: Int
-    var waveformDual: Bool
-    var computeWaveform: Bool
-    var amplitude: WaveformAmplitude
-    var spectrogramDual: Bool
-    var spectrogram: SpectrogramSettings?
+    var dual: Bool
+    var shown: Bool
+    var fullDetail: Bool
+}
+
+private struct SpecPictureKey: Equatable {
+    var path: String
+    var columns: Int
+    var dual: Bool
+    var shown: Bool
+    var type: SpectrogramType
+    var nFFT: Int
+    var hop: Int
+    var window: FFTWindow
+    var nMels: Int
+    var fmin: Double
+    var fmax: Double?
+    var fullDetail: Bool
 }

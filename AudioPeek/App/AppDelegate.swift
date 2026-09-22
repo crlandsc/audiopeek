@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyCenter.onEscape = { [weak self] in
             self?.slip.escape()
         }
+        hotkeyCenter.onPreviewSpace = { [weak self] in
+            self?.slip.previewSpace()
+        }
         slip.onFileOpened = { [weak self] in
             self?.login.noteFirstSuccessfulAudioOpen()
         }

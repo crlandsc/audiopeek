@@ -111,6 +111,7 @@ final class TestBridge: NSObject {
     let stateURL: URL
     var onOpenSettings: () -> Void = {}
     private var generation = 0
+    private var probePoint = NSPoint(x: 80, y: 10)
 
     init(
         store: SettingsStore,
@@ -185,6 +186,7 @@ final class TestBridge: NSObject {
             finderRequestCount: slip.requestCount,
             playbackRunning: slip.playbackRunning,
             escapeHotkeyRegistered: hotkey.escapeRegistered,
+            previewSpaceRegistered: hotkey.previewSpaceRegistered,
             viewerHotkeyStatus: Int(hotkey.viewerStatus),
             carbonDeliveries: hotkey.carbonDeliveries,
             panelCanBecomeKey: slip.canBecomeKey,
@@ -227,7 +229,16 @@ final class TestBridge: NSObject {
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
-            slipFrameHeight: slip.frame.height
+            slipFrameHeight: slip.frame.height,
+            movableByBackground: slip.movableByBackground,
+            filenameToolTip: slip.filenameToolTip,
+            metadataToolTip: slip.metadataToolTip,
+            metadataMaxX: slip.metadataMaxX,
+            volumeMinX: slip.volumeMinX,
+            loopMinX: slip.loopMinX,
+            gearMinX: slip.gearMinX,
+            filenameWidth: slip.filenameWidth,
+            hitKind: slip.hitKind(at: probePoint)
         )
         do {
             let encoder = JSONEncoder()
@@ -261,6 +272,8 @@ final class TestBridge: NSObject {
             hotkey.postViewerEvent()
         case "dispatchEscape":
             hotkey.postEscapeEvent()
+        case "dispatchPreviewSpace":
+            hotkey.postPreviewSpaceEvent()
         case "probeHotkey":
             let keyCode = UInt32(number("keyCode", in: userInfo) ?? 0)
             let modifiers = UInt32(number("modifiers", in: userInfo) ?? 0)
@@ -299,6 +312,11 @@ final class TestBridge: NSObject {
         case "setSpectrogramNFFT":
             let count = Int(number("nFFT", in: userInfo) ?? 2048)
             store.update { $0.spectrogram.nFFT = count }
+        case "setAmplitude":
+            let name = userInfo["amplitude"] as? String ?? "linear"
+            store.update { $0.waveformAmplitude = name == "decibels" ? .decibels : .linear }
+        case "setDbFloor":
+            store.update { $0.spectrogram.dbFloor = number("floor", in: userInfo) ?? -40 }
         case "setAppearance":
             slip.setForcedAppearance(userInfo["appearance"] as? String ?? "light")
         case "setWaveformColor":
@@ -324,6 +342,13 @@ final class TestBridge: NSObject {
             if let volume = number("volume", in: userInfo) {
                 store.setVolume(volume)
             }
+        case "setLoop":
+            let enabled = bool("enabled", in: userInfo) ?? false
+            store.update { $0.loopEnabled = enabled }
+        case "probeHit":
+            let x = number("x", in: userInfo) ?? 80
+            let y = number("y", in: userInfo) ?? 10
+            probePoint = NSPoint(x: x, y: y)
         case "setWindowFrame":
             guard let x = number("x", in: userInfo),
                   let y = number("y", in: userInfo),
@@ -431,6 +456,7 @@ private struct TestState: Encodable {
     var finderRequestCount: Int
     var playbackRunning: Bool
     var escapeHotkeyRegistered: Bool
+    var previewSpaceRegistered: Bool
     var viewerHotkeyStatus: Int
     var carbonDeliveries: Int
     var panelCanBecomeKey: Bool
@@ -474,4 +500,13 @@ private struct TestState: Encodable {
     var slipFrameY: Double
     var slipFrameWidth: Double
     var slipFrameHeight: Double
+    var movableByBackground: Bool
+    var filenameToolTip: String
+    var metadataToolTip: String
+    var metadataMaxX: Double
+    var volumeMinX: Double
+    var loopMinX: Double
+    var gearMinX: Double
+    var filenameWidth: Double
+    var hitKind: String
 }

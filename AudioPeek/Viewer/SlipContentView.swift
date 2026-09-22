@@ -36,6 +36,7 @@ final class SlipContentView: NSView {
     let filenameLabel = NSTextField(labelWithString: "")
     let metadataLabel = NSTextField(labelWithString: "")
     let volumeSlider = NSSlider()
+    let loopButton = NSButton()
     let gearButton = NSButton()
     let waveformPane = SlipPaneView()
     let spectrogramPane = SlipPaneView()
@@ -47,8 +48,11 @@ final class SlipContentView: NSView {
     var onPlay: () -> Void = {}
     var onVolume: (Double) -> Void = { _ in }
     var onGear: () -> Void = {}
+    var onLoop: (Bool) -> Void = { _ in }
     var onSplit: (Double) -> Void = { _ in }
     var onSeek: (String, Double) -> Void = { _, _ in }
+    var onScrub: (String, Double, ScrubPhase) -> Void = { _, _, _ in }
+    var onResizeEnd: () -> Void = {}
     var onAppearance: () -> Void = {}
     private var playheadFraction = 0.0
 
@@ -79,6 +83,7 @@ final class SlipContentView: NSView {
         filenameLabel.lineBreakMode = .byTruncatingTail
         filenameLabel.setAccessibilityIdentifier("slip.filename")
         metadataLabel.font = .systemFont(ofSize: 11)
+        metadataLabel.alignment = .right
         metadataLabel.lineBreakMode = .byTruncatingTail
         metadataLabel.setAccessibilityIdentifier("slip.metadata")
 
@@ -91,6 +96,13 @@ final class SlipContentView: NSView {
         volumeSlider.setAccessibilityIdentifier("slip.volume")
         volumeSlider.setAccessibilityLabel("Volume")
 
+        configurePlay(loopButton)
+        loopButton.setButtonType(.toggle)
+        loopButton.image = NSImage(systemSymbolName: "repeat", accessibilityDescription: "Loop")
+        loopButton.action = #selector(loopPressed)
+        loopButton.setAccessibilityIdentifier("slip.loop")
+        loopButton.setAccessibilityLabel("Loop")
+
         configurePlay(gearButton)
         gearButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Open settings")
         gearButton.action = #selector(gearPressed)
@@ -100,11 +112,11 @@ final class SlipContentView: NSView {
         waveformPane.setAccessibilityIdentifier("slip.waveform")
         spectrogramPane.setAccessibilityIdentifier("slip.spectrogram")
         waveformPane.layerContentsRedrawPolicy = .onSetNeedsDisplay
-        waveformPane.onClick = { [weak self] fraction in
-            self?.onSeek("waveform", fraction)
+        waveformPane.onScrub = { [weak self] fraction, phase in
+            self?.onScrub("waveform", fraction, phase)
         }
-        spectrogramPane.onClick = { [weak self] fraction in
-            self?.onSeek("spectrogram", fraction)
+        spectrogramPane.onScrub = { [weak self] fraction, phase in
+            self?.onScrub("spectrogram", fraction, phase)
         }
         waveformPlayhead.setAccessibilityIdentifier("slip.playhead.waveform")
         spectrogramPlayhead.setAccessibilityIdentifier("slip.playhead.spectrogram")
@@ -112,7 +124,7 @@ final class SlipContentView: NSView {
         progressFill.isHidden = true
         progressFill.setAccessibilityIdentifier("slip.progress")
 
-        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, gearButton, waveformPane, spectrogramPane, divider, progressFill] {
+        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, loopButton, gearButton, waveformPane, spectrogramPane, divider, progressFill] {
             addSubview(view)
         }
         waveformPane.addSubview(waveformPlayhead)
@@ -125,7 +137,7 @@ final class SlipContentView: NSView {
     }
 
     var headerOrder: [String] {
-        ["play", "filename", "metadata", "volume", "settings"]
+        ["play", "filename", "metadata", "volume", "loop", "settings"]
     }
 
     func setPlaying(_ playing: Bool) {
@@ -135,7 +147,8 @@ final class SlipContentView: NSView {
 
     func setPlayhead(fraction: Double) {
         playheadFraction = min(max(fraction, 0), 1)
-        needsLayout = true
+        placePlayhead(waveformPlayhead, in: waveformPane)
+        placePlayhead(spectrogramPlayhead, in: spectrogramPane)
     }
 
     func seekFraction(in pane: String) -> ((Double) -> Void)? {
@@ -147,6 +160,11 @@ final class SlipContentView: NSView {
         default:
             return nil
         }
+    }
+
+    func setLoop(_ enabled: Bool) {
+        loopButton.state = enabled ? .on : .off
+        loopButton.contentTintColor = enabled ? palette.head : palette.muted
     }
 
     func apply(showWaveform: Bool, showSpectrogram: Bool, split: Double, volume: Double) {
@@ -169,14 +187,22 @@ final class SlipContentView: NSView {
         playButton.frame = NSRect(x: pad, y: (headerHeight - button) / 2, width: button, height: button)
         let gearX = bounds.width - pad - button
         gearButton.frame = NSRect(x: gearX, y: (headerHeight - button) / 2, width: button, height: button)
-        let volumeX = gearX - gap - volumeWidth
+        let loopX = gearX - gap - button
+        loopButton.frame = NSRect(x: loopX, y: (headerHeight - button) / 2, width: button, height: button)
+        let volumeX = loopX - gap - volumeWidth
         volumeSlider.frame = NSRect(x: volumeX, y: (headerHeight - button) / 2, width: volumeWidth, height: button)
-        let metaWidth = min(metadataLabel.intrinsicContentSize.width, max(0, volumeX - pad - button - gap * 3 - 80))
         let nameX = pad + button + gap
-        let nameWidth = max(40, volumeX - gap - metaWidth - gap - nameX)
+        let available = max(0, volumeX - gap - nameX)
+        let metaWidth = min(fieldWidth(metadataLabel), available)
+        let metaX = volumeX - gap - metaWidth
+        let nameWidth = max(0, metaX - gap - nameX)
         let labelHeight = headerHeight - 2
         filenameLabel.frame = NSRect(x: nameX, y: 0, width: nameWidth, height: labelHeight)
-        metadataLabel.frame = NSRect(x: nameX + nameWidth + gap, y: 0, width: metaWidth, height: labelHeight)
+        metadataLabel.frame = NSRect(x: metaX, y: 0, width: metaWidth, height: labelHeight)
+        filenameLabel.toolTip = filenameLabel.stringValue.isEmpty ? nil : filenameLabel.stringValue
+        metadataLabel.toolTip = metadataLabel.stringValue.isEmpty ? nil : metadataLabel.stringValue
+        filenameLabel.lineBreakMode = .byTruncatingTail
+        metadataLabel.lineBreakMode = .byTruncatingTail
         progressFill.isHidden = !showProgress
         progressFill.frame = NSRect(
             x: 0,
@@ -246,10 +272,29 @@ final class SlipContentView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        if splitHit(local) || resizeEdges(local) != (false, false) {
+        if splitHit(local) || resizeEdges(local) != (false, false) || headerBackground(local) {
             return self
         }
         return super.hitTest(point)
+    }
+
+    func hitKind(at point: NSPoint) -> String {
+        if headerBackground(point) { return "header" }
+        if !waveformPane.isHidden, waveformPane.frame.contains(point) { return "waveform" }
+        if !spectrogramPane.isHidden, spectrogramPane.frame.contains(point) { return "spectrogram" }
+        return "other"
+    }
+
+    private func headerBackground(_ point: NSPoint) -> Bool {
+        guard point.y >= 0, point.y < 34, bounds.contains(point) else { return false }
+        let controls = [playButton, volumeSlider, loopButton, gearButton]
+        return !controls.contains { $0.frame.contains(point) }
+    }
+
+    private func fieldWidth(_ field: NSTextField) -> CGFloat {
+        guard !field.stringValue.isEmpty, let cell = field.cell else { return 0 }
+        let fitted = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: 10_000, height: 40)).width
+        return ceil(fitted)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -257,6 +302,10 @@ final class SlipContentView: NSView {
         let edges = resizeEdges(local)
         if edges.right || edges.bottom {
             resizeWindow(from: event, edges: edges)
+            return
+        }
+        if headerBackground(local) {
+            window?.performDrag(with: event)
             return
         }
         guard splitHit(local) else {
@@ -288,6 +337,7 @@ final class SlipContentView: NSView {
             guard let event else { return }
             if event.type == .leftMouseUp {
                 stop.pointee = true
+                self.onResizeEnd()
                 return
             }
             let mouse = NSEvent.mouseLocation
@@ -308,7 +358,8 @@ final class SlipContentView: NSView {
         let local = convert(event.locationInWindow, from: nil)
         let top: CGFloat = 35
         let body = max(1, bounds.height - top)
-        let fraction = min(max((local.y - top) / body, 0.08), 0.92)
+        let raw = min(max((local.y - top) / body, 0.08), 0.92)
+        let fraction = SplitSnap.value(raw)
         splitFraction = fraction
         onSplit(fraction)
         needsLayout = true
@@ -335,6 +386,7 @@ final class SlipContentView: NSView {
         metadataLabel.textColor = palette.muted
         playButton.contentTintColor = palette.ink
         gearButton.contentTintColor = palette.muted
+        loopButton.contentTintColor = loopButton.state == .on ? palette.head : palette.muted
         volumeSlider.trackFillColor = palette.head
         waveformPane.wantsLayer = true
         spectrogramPane.wantsLayer = true
@@ -357,6 +409,11 @@ final class SlipContentView: NSView {
         needsLayout = true
     }
 
+    func advanceReveal() {
+        waveformPane.advanceReveal()
+        spectrogramPane.advanceReveal()
+    }
+
     func setWaveform(snapshot: WaveformSnapshot, amplitude: WaveformAmplitude, color: WaveformColor) {
         waveformPane.setWaveform(snapshot: snapshot, amplitude: amplitude, color: color)
     }
@@ -367,6 +424,7 @@ final class SlipContentView: NSView {
 
     func setSpectrogram(
         columns: [[[Float]]],
+        totalColumns: Int,
         type: SpectrogramType,
         nFFT: Int,
         sampleRate: Double,
@@ -378,6 +436,7 @@ final class SlipContentView: NSView {
     ) {
         spectrogramPane.setSpectrogram(
             columns: columns,
+            totalColumns: totalColumns,
             type: type,
             nFFT: nFFT,
             sampleRate: sampleRate,
@@ -395,13 +454,24 @@ final class SlipContentView: NSView {
 
 }
 
+enum ScrubPhase {
+    case began
+    case moved
+    case ended
+}
+
 final class SlipPaneView: NSView {
-    var onClick: ((Double) -> Void)?
+    var onScrub: ((Double, ScrubPhase) -> Void)?
     private var lanes: [[WaveformColumn]] = []
     private var columnCount = 0
     private var amplitude = WaveformAmplitude.linear
     private var waveformColor = WaveformColor.systemBlue
     private var spectrogramImages: [CGImage] = []
+    private var spectrogramColumnCount = 0
+    private var spectrogramBuild = 0
+    private var revealedColumns: CGFloat = 0
+    private var targetColumns: CGFloat = 0
+    var revealedColumnCount: CGFloat { revealedColumns }
 
     override var isFlipped: Bool { true }
 
@@ -410,17 +480,21 @@ final class SlipPaneView: NSView {
         columnCount = snapshot.columnCount
         self.amplitude = amplitude
         waveformColor = color
+        setRevealTarget(snapshot.lanes.map(\.count).max() ?? 0)
         needsDisplay = true
     }
 
     func clearWaveform() {
         lanes = []
         columnCount = 0
+        revealedColumns = 0
+        targetColumns = 0
         needsDisplay = true
     }
 
     func setSpectrogram(
         columns: [[[Float]]],
+        totalColumns: Int,
         type: SpectrogramType,
         nFFT: Int,
         sampleRate: Double,
@@ -430,23 +504,64 @@ final class SlipPaneView: NSView {
         dbFloor: Double,
         dbRange: Double
     ) {
-        spectrogramImages = SpectrogramImage.make(
-            columns: columns,
-            type: type,
-            nFFT: nFFT,
-            sampleRate: sampleRate,
-            fmin: fmin,
-            fmax: fmax,
-            decibels: decibels,
-            dbFloor: dbFloor,
-            dbRange: dbRange
-        )
-        needsDisplay = true
+        spectrogramColumnCount = max(totalColumns, columns.first?.count ?? 0)
+        spectrogramBuild += 1
+        let build = spectrogramBuild
+        let captured = columns
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let images = SpectrogramImage.make(
+                columns: captured,
+                type: type,
+                nFFT: nFFT,
+                sampleRate: sampleRate,
+                fmin: fmin,
+                fmax: fmax,
+                decibels: decibels,
+                dbFloor: dbFloor,
+                dbRange: dbRange
+            )
+            DispatchQueue.main.async {
+                guard let self, self.spectrogramBuild == build else { return }
+                self.spectrogramImages = images
+                self.setRevealTarget(images.first?.width ?? 0)
+                self.needsDisplay = true
+            }
+        }
     }
 
     func clearSpectrogram() {
         spectrogramImages = []
+        spectrogramColumnCount = 0
+        spectrogramBuild += 1
+        revealedColumns = 0
+        targetColumns = 0
         needsDisplay = true
+    }
+
+    func advanceReveal() {
+        let gap = targetColumns - revealedColumns
+        if gap <= 0.35 {
+            guard revealedColumns != targetColumns else { return }
+            revealedColumns = targetColumns
+            needsDisplay = true
+            return
+        }
+        let step = max(gap * (1.0 / 60.0) / 0.12, 0.2)
+        revealedColumns = min(targetColumns, revealedColumns + step)
+        needsDisplay = true
+    }
+
+    private func setRevealTarget(_ count: Int) {
+        let next = CGFloat(max(count, 0))
+        if next + 1 < targetColumns {
+            revealedColumns = 0
+        }
+        targetColumns = next
+    }
+
+    private func revealClipWidth(total: Int) -> CGFloat {
+        let span = CGFloat(max(total, 1))
+        return bounds.width * min(max(revealedColumns, 0), span) / span
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -455,6 +570,10 @@ final class SlipPaneView: NSView {
             return
         }
         guard columnCount > 0, let lane = lanes.first, !lane.isEmpty else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.clip(to: CGRect(x: 0, y: 0, width: revealClipWidth(total: columnCount), height: bounds.height))
+        defer { ctx.restoreGState() }
         let color = resolvedColor()
         let gap: CGFloat = lanes.count > 1 ? 3 : 0
         let laneHeight = max(1, (bounds.height - gap * CGFloat(max(lanes.count - 1, 0))) / CGFloat(lanes.count))
@@ -491,6 +610,9 @@ final class SlipPaneView: NSView {
 
     private func drawSpectrogram() {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.clip(to: CGRect(x: 0, y: 0, width: revealClipWidth(total: spectrogramColumnCount), height: bounds.height))
+        defer { ctx.restoreGState() }
         let gap: CGFloat = spectrogramImages.count > 1 ? 3 : 0
         let laneHeight = max(1, (bounds.height - gap * CGFloat(max(spectrogramImages.count - 1, 0))) / CGFloat(spectrogramImages.count))
         for (index, image) in spectrogramImages.enumerated() {
@@ -504,15 +626,32 @@ final class SlipPaneView: NSView {
             ctx.translateBy(x: rect.minX, y: rect.minY + rect.height)
             ctx.scaleBy(x: 1, y: -1)
             ctx.interpolationQuality = .none
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+            let filled = CGFloat(image.width)
+            let total = CGFloat(max(spectrogramColumnCount, Int(filled), 1))
+            let drawWidth = bounds.width * filled / total
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: drawWidth, height: rect.height))
             ctx.restoreGState()
         }
     }
 
     override func mouseDown(with event: NSEvent) {
-        let local = convert(event.locationInWindow, from: nil)
         guard bounds.width > 1 else { return }
-        onClick?(Double(local.x / bounds.width))
+        report(event, .began)
+        window?.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: NSEvent.foreverDuration, mode: .eventTracking) { event, stop in
+            guard let event else { return }
+            if event.type == .leftMouseUp {
+                self.report(event, .ended)
+                stop.pointee = true
+                return
+            }
+            self.report(event, .moved)
+        }
+    }
+
+    private func report(_ event: NSEvent, _ phase: ScrubPhase) {
+        let local = convert(event.locationInWindow, from: nil)
+        let fraction = min(1, max(0, Double(local.x / bounds.width)))
+        onScrub?(fraction, phase)
     }
 
     private func yPosition(_ amplitudeValue: Float, y0: CGFloat, height: CGFloat) -> CGFloat {
@@ -567,6 +706,10 @@ extension SlipContentView {
     @objc private func gearPressed() {
         onGear()
     }
+
+    @objc private func loopPressed() {
+        onLoop(loopButton.state == .on)
+    }
 }
 
 enum MagmaColor {
@@ -602,7 +745,7 @@ enum MagmaColor {
     }
 }
 
-private enum SpectrogramImage {
+enum SpectrogramImage {
     static func make(
         columns: [[[Float]]],
         type: SpectrogramType,
@@ -659,7 +802,7 @@ private enum SpectrogramImage {
         peak: Float
     ) -> CGImage? {
         let width = lane.count
-        let height = bins
+        let height = min(bins, 256)
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         for row in 0..<height {
             let bin = binIndex(
@@ -730,11 +873,18 @@ private enum SpectrogramImage {
             let fromBottom = 1 - (Double(row) + 0.5) / Double(max(rows, 1))
             let low = max(fmin, sampleRate / Double(nFFT))
             let high = max(fmax, low)
-            guard low > 0, high > low else { return min(bins - 1, max(0, bins - 1 - row)) }
+            guard low > 0, high > low else { return scaledBin(row, rows: rows, bins: bins) }
             let freq = exp(log(low) + (log(high) - log(low)) * fromBottom)
             let bin = Int((freq * Double(nFFT) / sampleRate).rounded())
             return min(bins - 1, max(0, bin))
         }
-        return min(bins - 1, max(0, bins - 1 - row))
+        return scaledBin(row, rows: rows, bins: bins)
+    }
+
+    private static func scaledBin(_ row: Int, rows: Int, bins: Int) -> Int {
+        guard rows > 1, bins > 1 else { return 0 }
+        let fromTop = Double(row) / Double(rows - 1)
+        let bin = Int((Double(bins - 1) * (1 - fromTop)).rounded())
+        return min(bins - 1, max(0, bin))
     }
 }
