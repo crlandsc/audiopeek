@@ -211,6 +211,19 @@ final class TestBridge: NSObject {
             spectrogramLaneCount: slip.spectrogramLaneCount,
             spectrogramBinCount: slip.spectrogramBinCount,
             spectrogramPeak: slip.spectrogramPeak,
+            slipAppearance: slip.slipAppearance,
+            chromeRed: slip.chromeRed,
+            chromeGreen: slip.chromeGreen,
+            chromeBlue: slip.chromeBlue,
+            playheadRed: slip.playheadRed,
+            playheadGreen: slip.playheadGreen,
+            playheadBlue: slip.playheadBlue,
+            playheadWidth: slip.playheadWidth,
+            waveformUsesSystemBlue: slip.waveformUsesSystemBlue,
+            waveformRed: slip.waveformRed,
+            waveformGreen: slip.waveformGreen,
+            waveformBlue: slip.waveformBlue,
+            settingsLabels: settings.controlLabels(),
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -286,6 +299,15 @@ final class TestBridge: NSObject {
         case "setSpectrogramNFFT":
             let count = Int(number("nFFT", in: userInfo) ?? 2048)
             store.update { $0.spectrogram.nFFT = count }
+        case "setAppearance":
+            slip.setForcedAppearance(userInfo["appearance"] as? String ?? "light")
+        case "setWaveformColor":
+            store.setCustomWaveformColor(
+                red: number("red", in: userInfo) ?? 1,
+                green: number("green", in: userInfo) ?? 0,
+                blue: number("blue", in: userInfo) ?? 0,
+                alpha: number("alpha", in: userInfo) ?? 1
+            )
         case "setSlipVolume":
             if let volume = number("volume", in: userInfo) {
                 store.setVolume(volume)
@@ -435,6 +457,19 @@ private struct TestState: Encodable {
     var spectrogramLaneCount: Int
     var spectrogramBinCount: Int
     var spectrogramPeak: Double
+    var slipAppearance: String
+    var chromeRed: Double
+    var chromeGreen: Double
+    var chromeBlue: Double
+    var playheadRed: Double
+    var playheadGreen: Double
+    var playheadBlue: Double
+    var playheadWidth: Double
+    var waveformUsesSystemBlue: Bool
+    var waveformRed: Double
+    var waveformGreen: Double
+    var waveformBlue: Double
+    var settingsLabels: [String]
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double

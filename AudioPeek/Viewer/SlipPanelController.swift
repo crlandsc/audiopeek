@@ -64,6 +64,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         overview.onSnapshot = { [weak self] snapshot in
             self?.applyOverview(snapshot)
         }
+        content.onAppearance = { [weak self] in
+            self?.onActivity()
+        }
         applySettings()
     }
 
@@ -182,6 +185,27 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             scheduleOverviewRestart()
         }
     }
+
+    func setForcedAppearance(_ name: String) {
+        let appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
+        NSApp.appearance = appearance
+        panel?.appearance = appearance
+        content.apply(appearance: name)
+    }
+
+    var slipAppearance: String { content.appearanceName }
+
+    var chromeRed: Double { content.chromeRGB.0 }
+    var chromeGreen: Double { content.chromeRGB.1 }
+    var chromeBlue: Double { content.chromeRGB.2 }
+    var playheadRed: Double { content.playheadRGB.0 }
+    var playheadGreen: Double { content.playheadRGB.1 }
+    var playheadBlue: Double { content.playheadRGB.2 }
+    var playheadWidth: Double { content.playheadWidth }
+    var waveformUsesSystemBlue: Bool { store.blob.waveformColor.usesSystemBlue }
+    var waveformRed: Double { content.waveformRGB().0 }
+    var waveformGreen: Double { content.waveformRGB().1 }
+    var waveformBlue: Double { content.waveformRGB().2 }
 
     func setOverviewStall(_ enabled: Bool) {
         overview.setStallBetweenChunks(enabled)

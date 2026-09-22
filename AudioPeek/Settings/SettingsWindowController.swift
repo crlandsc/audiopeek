@@ -25,6 +25,40 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.isVisible ?? false
     }
 
+    func controlLabels() -> [String] {
+        guard let view = window?.contentView else { return [] }
+        view.layoutSubtreeIfNeeded()
+        var labels: [String] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ object: AnyObject) {
+            let token = ObjectIdentifier(object)
+            if seen.contains(token) { return }
+            seen.insert(token)
+            if let identifier = object.accessibilityIdentifier(), !identifier.isEmpty {
+                labels.append(identifier)
+            }
+            if let label = object.accessibilityLabel(), !label.isEmpty {
+                labels.append(label)
+            }
+            if let button = object as? NSButton, !button.title.isEmpty {
+                labels.append(button.title)
+            }
+            if let field = object as? NSTextField, !field.stringValue.isEmpty {
+                labels.append(field.stringValue)
+            }
+            if let view = object as? NSView {
+                for child in view.subviews {
+                    walk(child)
+                }
+            }
+            for child in object.accessibilityChildren() ?? [] {
+                walk(child as AnyObject)
+            }
+        }
+        walk(view)
+        return labels
+    }
+
     func show() {
         let window = self.window ?? makeWindow()
         self.window = window

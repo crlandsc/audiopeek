@@ -49,6 +49,7 @@ final class SlipContentView: NSView {
     var onGear: () -> Void = {}
     var onSplit: (Double) -> Void = { _ in }
     var onSeek: (String, Double) -> Void = { _, _ in }
+    var onAppearance: () -> Void = {}
     private var playheadFraction = 0.0
 
     var showWaveform = true
@@ -215,6 +216,32 @@ final class SlipContentView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyPalette()
+        onAppearance()
+    }
+
+    var appearanceName: String {
+        effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+    }
+
+    var chromeRGB: (Double, Double, Double) { Self.rgb(palette.background) }
+
+    var playheadRGB: (Double, Double, Double) { Self.rgb(palette.head) }
+
+    var playheadWidth: Double { Double(waveformPlayhead.frame.width) }
+
+    func waveformRGB() -> (Double, Double, Double) {
+        waveformPane.resolvedWaveformRGB(appearance: effectiveAppearance)
+    }
+
+    func apply(appearance name: String) {
+        let appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
+        self.appearance = appearance
+        applyPalette()
+    }
+
+    private static func rgb(_ color: NSColor) -> (Double, Double, Double) {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        return (Double(rgb.redComponent), Double(rgb.greenComponent), Double(rgb.blueComponent))
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -300,7 +327,7 @@ final class SlipContentView: NSView {
         button.target = self
     }
 
-    private func applyPalette() {
+    func applyPalette() {
         palette = SlipPalette.current(effectiveAppearance)
         layer?.backgroundColor = palette.background.cgColor
         layer?.borderColor = palette.line.cgColor
@@ -500,6 +527,20 @@ final class SlipPaneView: NSView {
         return y0 + (1 - unit) * height
     }
 
+    func resolvedWaveformRGB(appearance: NSAppearance) -> (Double, Double, Double) {
+        var red = 0.0
+        var green = 0.0
+        var blue = 0.0
+        appearance.performAsCurrentDrawingAppearance {
+            let color = resolvedColor()
+            let rgb = color.usingColorSpace(.sRGB) ?? color
+            red = Double(rgb.redComponent)
+            green = Double(rgb.greenComponent)
+            blue = Double(rgb.blueComponent)
+        }
+        return (red, green, blue)
+    }
+
     private func resolvedColor() -> NSColor {
         if waveformColor.usesSystemBlue {
             return .systemBlue
@@ -528,7 +569,7 @@ extension SlipContentView {
     }
 }
 
-private enum MagmaColor {
+enum MagmaColor {
     private static let stops: [(CGFloat, CGFloat, CGFloat)] = [
         (0.00146, 0.00047, 0.01387),
         (0.02815, 0.02115, 0.13640),

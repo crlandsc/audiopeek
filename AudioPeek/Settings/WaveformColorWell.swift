@@ -21,6 +21,7 @@ struct WaveformColorWell: NSViewRepresentable {
     func makeNSView(context: Context) -> NSColorWell {
         let well = NSColorWell(style: .expanded)
         well.color = color
+        well.setAccessibilityIdentifier("waveform.colorWell")
         well.target = context.coordinator
         well.action = #selector(Coordinator.changed(_:))
         return well
