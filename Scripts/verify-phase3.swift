@@ -193,8 +193,10 @@ Check.expect(abs((state["playheadSeconds"]?.double ?? 0) - pausedAt) < 0.15, "re
 state = command("pressPlay")
 
 state = command("seek", extra: ["pane": "waveform", "fraction": 0.25])
+state = waitUntil(at: stateURL, timeout: 2) { abs(($0["playheadSeconds"]?.double ?? 0) - 0.3) < 0.08 } ?? state
 Check.expect(abs((state["playheadSeconds"]?.double ?? 0) - 0.3) < 0.08, "waveform seek \(state["playheadSeconds"]?.double ?? -1)")
 state = command("seek", extra: ["pane": "spectrogram", "fraction": 0.5])
+state = waitUntil(at: stateURL, timeout: 2) { abs(($0["playheadSeconds"]?.double ?? 0) - 0.6) < 0.08 } ?? state
 Check.expect(abs((state["playheadSeconds"]?.double ?? 0) - 0.6) < 0.08, "spectrogram seek \(state["playheadSeconds"]?.double ?? -1)")
 
 state = command("setPanes", extra: ["waveform": false, "spectrogram": false])

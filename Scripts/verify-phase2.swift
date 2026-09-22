@@ -102,6 +102,34 @@ func post(_ command: String, extra: [String: Any] = [:]) {
     )
 }
 
+func writeWav(to url: URL) {
+    var data = Data()
+    func append32(_ value: UInt32) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+    func append16(_ value: UInt16) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+    let frames = 44100
+    data.append(contentsOf: "RIFF".utf8)
+    append32(UInt32(36 + frames * 2))
+    data.append(contentsOf: "WAVE".utf8)
+    data.append(contentsOf: "fmt ".utf8)
+    append32(16)
+    append16(1)
+    append16(1)
+    append32(44100)
+    append32(44100 * 2)
+    append16(2)
+    append16(16)
+    data.append(contentsOf: "data".utf8)
+    append32(UInt32(frames * 2))
+    data.append(Data(count: frames * 2))
+    try! data.write(to: url)
+}
+
 func sourceHits(_ pattern: String) -> String {
     run("/usr/bin/grep", ["-R", "-n", "-E", pattern, "AudioPeek", "--include=*.swift"]).1
 }
@@ -129,8 +157,8 @@ let wavB = root.appendingPathComponent("other.wav")
 let text = root.appendingPathComponent("notes.txt")
 let ogg = root.appendingPathComponent("song.ogg")
 let folder = root.appendingPathComponent("Folder", isDirectory: true)
-try! Data([0x52, 0x49, 0x46, 0x46]).write(to: wavA)
-try! Data([0x52, 0x49, 0x46, 0x46]).write(to: wavB)
+writeWav(to: wavA)
+writeWav(to: wavB)
 try! Data("hello".utf8).write(to: text)
 try! Data("ogg".utf8).write(to: ogg)
 try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -143,7 +171,8 @@ let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase2-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
-    "injectLoginFailure": NSNull(),
+    "injectLoginFailure": "succeeded",
+    "machineLoad": ["thermal": "nominal", "cpu": 0.2],
     "finderSelection": "empty",
 ]
 try! JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted]).write(to: configURL)
@@ -238,14 +267,14 @@ Check.expect(state["slipVisible"]?.bool == false, "a folder leaves the panel clo
 
 state = command("setFinder", extra: ["mode": "paths", "paths": [wavA.path]])
 state = command("dispatchViewerHotkey", settle: true)
-state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true } ?? state
+state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true && $0["playbackRunning"]?.bool == true } ?? state
 Check.expect(state["slipVisible"]?.bool == true, "one audio file opens the panel")
 Check.expect(state["slipFilename"]?.string == "tone.wav", "filename \(state["slipFilename"]?.string ?? "")")
-Check.expect(state["slipMetadata"]?.string == "WAV", "metadata \(state["slipMetadata"]?.string ?? "")")
+Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:01", "metadata \(state["slipMetadata"]?.string ?? "")")
 Check.expect(state["headerOrder"]?.strings == ["play", "filename", "metadata", "volume", "settings"], "header order \(state["headerOrder"]?.strings ?? [])")
 Check.expect(state["finderPollScheduled"]?.bool == true, "visible panel schedules the Finder timer")
 Check.expect(state["escapeHotkeyRegistered"]?.bool == true, "escape is registered while the panel is visible")
-Check.expect(state["playbackRunning"]?.bool == false, "opening the panel does not play")
+Check.expect(state["playbackRunning"]?.bool == true, "opening the panel starts playback")
 Check.expect(state["panelIsKey"]?.bool == false, "the panel is not key")
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
 Check.expect(abs((state["slipFrameHeight"]?.double ?? 0) - 500) < 1, "first height 500, got \(state["slipFrameHeight"]?.double ?? 0)")
@@ -260,10 +289,14 @@ Check.expect((polled?["finderRequestCount"]?.int ?? 0) > requestsAtOpen, "the Fi
 
 let volumeBefore = run("/usr/bin/osascript", ["-e", "output volume of (get volume settings)"])
 state = command("pressPlay")
+state = waitUntil(at: stateURL, timeout: 2) {
+    ($0["playClicks"]?.int ?? 0) >= 1 && $0["playbackRunning"]?.bool == false
+} ?? state
 Check.expect((state["playClicks"]?.int ?? 0) >= 1, "play control is visible")
-Check.expect(state["playbackRunning"]?.bool == false, "play does not start audio")
+Check.expect(state["playbackRunning"]?.bool == false, "play pauses the autoplay")
 state = command("setSlipVolume", extra: ["volume": 0.4])
-Check.expect(abs((state["storedVolume"]?.double ?? -1) - 0.4) < 0.001, "slider stores 0.4")
+state = waitUntil(at: stateURL, timeout: 2) { abs(($0["storedVolume"]?.double ?? -1) - 0.4) < 0.001 } ?? state
+Check.expect(abs((state["storedVolume"]?.double ?? -1) - 0.4) < 0.001, "slider stores 0.4, got \(state["storedVolume"]?.double ?? -1)")
 let volumeAfter = run("/usr/bin/osascript", ["-e", "output volume of (get volume settings)"])
 Check.expect(volumeBefore.1 == volumeAfter.1, "system volume unchanged (\(volumeBefore.1.trimmingCharacters(in: .whitespacesAndNewlines)) vs \(volumeAfter.1.trimmingCharacters(in: .whitespacesAndNewlines)))")
 
@@ -282,7 +315,7 @@ Check.expect(state["slipVisible"]?.bool == true, "a click outside leaves the pan
 state = command("setFinder", extra: ["mode": "paths", "paths": [wavB.path]])
 let followed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipFilename"]?.string == "other.wav" }
 Check.expect(followed?["slipFilename"]?.string == "other.wav", "the poll follows a new audio file")
-Check.expect(followed?["slipMetadata"]?.string == "WAV", "the new file's metadata is WAV")
+Check.expect(followed?["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:01", "the new file's metadata is \(followed?["slipMetadata"]?.string ?? "")")
 
 state = command("setFinder", extra: ["mode": "paths", "paths": []])
 let closed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipVisible"]?.bool == false }
