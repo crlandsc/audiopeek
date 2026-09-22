@@ -21,7 +21,14 @@ struct SpectrogramJob: Equatable, Sendable {
 
     func isValid(sampleRate: Double) -> Bool {
         let high = resolvedFMax(sampleRate: sampleRate)
-        return hop >= 1 && nFFT >= max(hop, 2) && nMels >= 1 && fmin < high && sampleRate > 0
+        return hop >= 1 && nFFT >= 2 && nMels >= 1 && fmin < high && sampleRate > 0
+    }
+}
+
+enum OverviewDetail {
+    static func inspectFrames(duration: TimeInterval, fullDetail: Bool, nFFT: Int) -> Int {
+        if fullDetail || duration <= 30 { return 0 }
+        return max(256, min(max(nFFT, 256), 2048))
     }
 }
 
@@ -122,6 +129,7 @@ final class SpectrogramAccumulator {
     private let log2n: vDSP_Length
     private var pending: [[Float]]
     private var head: [Int]
+    var cancelled = false
     private var hopIndex = 0
     private var powers: [Float]
     private var highestColumn = -1
@@ -236,6 +244,7 @@ final class SpectrogramAccumulator {
 
     private func drain() {
         while pending[0].count - head[0] >= nFFT {
+            if cancelled { return }
             let center = hopIndex * hop
             let column = min(columnCount - 1, center * columnCount / totalFrames)
             for lane in 0..<lanes {
@@ -268,13 +277,15 @@ final class SpectrogramAccumulator {
     private func project(_ power: [Float]) -> [Float] {
         guard let weights else { return power }
         var bands = [Float](repeating: 0, count: binCount)
-        for band in 0..<binCount {
-            var sum: Float = 0
-            let row = band * frequencyBins
-            for bin in 0..<frequencyBins {
-                sum += weights[row + bin] * power[bin]
+        power.withUnsafeBufferPointer { powerPointer in
+            weights.withUnsafeBufferPointer { weightPointer in
+                guard let powerBase = powerPointer.baseAddress, let weightBase = weightPointer.baseAddress else { return }
+                for band in 0..<binCount {
+                    var sum: Float = 0
+                    vDSP_dotpr(weightBase + band * frequencyBins, 1, powerBase, 1, &sum, vDSP_Length(frequencyBins))
+                    bands[band] = sum
+                }
             }
-            bands[band] = sum
         }
         return bands
     }

@@ -184,7 +184,8 @@ enum WaveformReader {
         proceed: (WaveformReadPoint) -> Bool,
         onChunk: (WaveformAccumulator) -> Void,
         onSamples: ((UnsafePointer<Float>, Int, Int, Double, Int) -> Void)? = nil,
-        computeWaveform: Bool = true
+        computeWaveform: Bool = true,
+        inspectPerColumn: Int = 0
     ) -> WaveformReadResult {
         if !proceed(.beforeOpen) {
             return WaveformReadResult(stop: .cancelled, chunks: 0, opened: false, accumulator: nil)
@@ -224,6 +225,53 @@ enum WaveformReader {
         let data = UnsafeMutablePointer<Float>.allocate(capacity: sampleCapacity)
         defer { data.deallocate() }
         var chunks = 0
+        if inspectPerColumn > 0 {
+            let totalFrames = accumulator.totalFrames
+            let columns = max(columnCount, 1)
+            var fileFrame = 0
+            while fileFrame < totalFrames {
+                if chunks > 0, !proceed(.betweenChunks) {
+                    return WaveformReadResult(stop: .cancelled, chunks: chunks, opened: true, accumulator: accumulator)
+                }
+                let columnEnd = min(totalFrames, (min(columns - 1, fileFrame * columns / totalFrames) + 1) * totalFrames / columns)
+                let take = min(inspectPerColumn, max(0, columnEnd - fileFrame))
+                if take > 0 {
+                    var position = Int64(fileFrame)
+                    if ExtAudioFileSeek(audioFile, position) != noErr {
+                        return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
+                    }
+                    var list = AudioBufferList(
+                        mNumberBuffers: 1,
+                        mBuffers: AudioBuffer(
+                            mNumberChannels: UInt32(channels),
+                            mDataByteSize: UInt32(sampleCapacity * MemoryLayout<Float>.size),
+                            mData: data
+                        )
+                    )
+                    var frames = UInt32(min(take, Int(framesPerChunk)))
+                    let status = ExtAudioFileRead(audioFile, &frames, &list)
+                    if status != noErr {
+                        return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
+                    }
+                    if frames > 0 {
+                        onSamples?(data, Int(frames), channels, description.sampleRate, totalFrames)
+                        if computeWaveform {
+                            accumulator.ingest(base: data, frames: Int(frames))
+                        } else {
+                            accumulator.skip(frames: Int(frames))
+                        }
+                    }
+                }
+                if accumulator.framesSeen < columnEnd {
+                    accumulator.skip(frames: columnEnd - accumulator.framesSeen)
+                }
+                fileFrame = max(columnEnd, fileFrame + 1)
+                chunks += 1
+                onChunk(accumulator)
+                if accumulator.framesSeen >= totalFrames { break }
+            }
+            return WaveformReadResult(stop: .finished, chunks: chunks, opened: true, accumulator: accumulator)
+        }
         while accumulator.framesSeen < accumulator.totalFrames {
             var list = AudioBufferList(
                 mNumberBuffers: 1,
@@ -337,7 +385,7 @@ final class WaveformOverview: @unchecked Sendable {
         }
     }
 
-    func start(url: URL, columnCount: Int, waveformDual: Bool, computeWaveform: Bool, spectrogram: SpectrogramJob?) {
+    func start(url: URL, columnCount: Int, waveformDual: Bool, computeWaveform: Bool, spectrogram: SpectrogramJob?, inspectPerColumn: Int = 0) {
         let token: Int
         let published: WaveformSnapshot
         lock.lock()
@@ -366,7 +414,8 @@ final class WaveformOverview: @unchecked Sendable {
                 columnCount: max(columnCount, 1),
                 waveformDual: waveformDual,
                 computeWaveform: computeWaveform,
-                spectrogram: spectrogram
+                spectrogram: spectrogram,
+                inspectPerColumn: inspectPerColumn
             )
         }
     }
@@ -381,7 +430,8 @@ final class WaveformOverview: @unchecked Sendable {
         columnCount: Int,
         waveformDual: Bool,
         computeWaveform: Bool,
-        spectrogram: SpectrogramJob?
+        spectrogram: SpectrogramJob?,
+        inspectPerColumn: Int
     ) {
         enterPass()
         defer { leavePass() }
@@ -394,7 +444,10 @@ final class WaveformOverview: @unchecked Sendable {
             proceed: { [weak self] point in
                 guard let self else { return false }
                 switch point {
-                case .beforeOpen, .betweenChunks:
+                case .beforeOpen:
+                    return self.waitToContinue(token)
+                case .betweenChunks:
+                    box.engine?.cancelled = !self.isCurrent(token)
                     return self.waitToContinue(token)
                 case .afterOpen:
                     return self.isCurrent(token)
@@ -411,17 +464,19 @@ final class WaveformOverview: @unchecked Sendable {
             },
             onSamples: { base, frames, channels, sampleRate, totalFrames in
                 if box.engine == nil, let spectrogram {
+                    let pictured = inspectPerColumn > 0 ? columnCount * inspectPerColumn : totalFrames
                     box.engine = SpectrogramAccumulator(
                         job: spectrogram,
                         sampleRate: sampleRate,
                         channels: channels,
-                        totalFrames: totalFrames,
+                        totalFrames: pictured,
                         columnCount: columnCount
                     )
                 }
                 box.engine?.ingest(base: base, frames: frames, channels: channels)
             },
-            computeWaveform: computeWaveform
+            computeWaveform: computeWaveform,
+            inspectPerColumn: inspectPerColumn
         )
         guard isCurrent(token) else { return }
         if result.stop == .finished {

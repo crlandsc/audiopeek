@@ -32,6 +32,32 @@ final class SpectrogramPassTests: XCTestCase {
         XCTAssertTrue(OverviewEstimate.isCompressed(url: URL(fileURLWithPath: "/tmp/a.flac")))
     }
 
+    func testLongFilesInspectACoarseWindowUnlessFullDetailIsOn() {
+        XCTAssertEqual(OverviewDetail.inspectFrames(duration: 10, fullDetail: false, nFFT: 2048), 0)
+        XCTAssertEqual(OverviewDetail.inspectFrames(duration: 60, fullDetail: true, nFFT: 2048), 0)
+        XCTAssertEqual(OverviewDetail.inspectFrames(duration: 60, fullDetail: false, nFFT: 2048), 2048)
+        XCTAssertEqual(OverviewDetail.inspectFrames(duration: 60, fullDetail: false, nFFT: 512), 512)
+    }
+
+    func testCoarseReadStillFinishesALongFile() throws {
+        let frames = 44_100 * 2
+        let url = URL(fileURLWithPath: "/tmp/audiopeek-coarse-\(UUID().uuidString).wav")
+        try writeSilent(frames: frames, to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = WaveformReader.read(
+            url: url,
+            columnCount: 16,
+            dual: false,
+            chunkFrames: 8192,
+            proceed: { _ in true },
+            onChunk: { _ in },
+            computeWaveform: true,
+            inspectPerColumn: 512
+        )
+        XCTAssertEqual(result.stop, .finished)
+        XCTAssertGreaterThan(result.accumulator?.completedColumns ?? 0, 0)
+    }
+
     func testInvalidKnobsDoNotBuildAndDualKeepsTwoLanes() {
         let invalid = factoryJob(hop: 0)
         XCTAssertFalse(invalid.isValid(sampleRate: 44100))
@@ -42,6 +68,11 @@ final class SpectrogramPassTests: XCTestCase {
         XCTAssertEqual(WaveformColumns.spectrogramShowing(channels: 16, dual: true), 2)
         XCTAssertNil(WaveformColumns.spectrogramShowing(channels: 16, dual: false))
         XCTAssertNil(WaveformColumns.spectrogramShowing(channels: 2, dual: true))
+    }
+
+    private func writeSilent(frames: Int, to url: URL) throws {
+        var samples = [Int16](repeating: 0, count: frames)
+        try writeWav(frames: samples, to: url)
     }
 
     func testMelMatchesPinnedLibrosa() throws {
