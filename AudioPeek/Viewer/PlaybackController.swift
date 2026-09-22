@@ -15,11 +15,18 @@ final class PlaybackController {
     private var origin: TimeInterval = 0
     private var userPaused = false
     private var playGeneration = 0
+    private var renderQueued = false
+    private var scrubbing = false
+    private var playAfterScrub = false
+    private var clockAnchorSample: AVAudioFramePosition?
+    private var clockAnchorUptime: TimeInterval?
     private(set) var isPlaying = false
     private(set) var position: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     private(set) var info: OpenedAudio?
     var onChange: () -> Void = {}
+    var loopIsOn: () -> Bool = { false }
+    var playbackAllowed: () -> Bool = { true }
 
     init() {
         engine.attach(node)
@@ -71,10 +78,39 @@ final class PlaybackController {
 
     func seek(toFraction fraction: Double) {
         guard duration > 0 else { return }
-        let clamped = min(max(fraction, 0), 1)
-        position = clamped * duration
+        position = clamped(fraction) * duration
         origin = position
         if isPlaying {
+            playFromCurrent()
+        } else {
+            onChange()
+        }
+    }
+
+    func beginScrub(toFraction fraction: Double) {
+        guard duration > 0 else { return }
+        playAfterScrub = isPlaying
+        scrubbing = true
+        if isPlaying {
+            userPaused = true
+            pauseEngine()
+        }
+        placeScrub(fraction)
+    }
+
+    func moveScrub(toFraction fraction: Double) {
+        guard scrubbing else { return }
+        placeScrub(fraction)
+    }
+
+    func endScrub(toFraction fraction: Double) {
+        guard duration > 0 else { return }
+        placeScrub(fraction)
+        let resume = playAfterScrub
+        scrubbing = false
+        playAfterScrub = false
+        if resume {
+            userPaused = false
             playFromCurrent()
         } else {
             onChange()
@@ -102,6 +138,10 @@ final class PlaybackController {
             engine.stop()
         }
         playGeneration += 1
+        renderQueued = false
+        scrubbing = false
+        playAfterScrub = false
+        clearClockAnchor()
         isPlaying = false
         userPaused = false
         file = nil
@@ -111,13 +151,57 @@ final class PlaybackController {
         duration = 0
     }
 
+    func renderedSampleTime() -> Int64? {
+        guard let nodeTime = node.lastRenderTime,
+              let playerTime = node.playerTime(forNodeTime: nodeTime) else { return nil }
+        return playerTime.sampleTime
+    }
+
+    var clockDescription: String {
+        guard let file else { return "no-file pos=\(position) dur=\(duration) playing=\(isPlaying)" }
+        let fileRate = file.processingFormat.sampleRate
+        guard let nodeTime = node.lastRenderTime, let playerTime = node.playerTime(forNodeTime: nodeTime) else {
+            return "pos=\(position) dur=\(duration) playing=\(isPlaying) fileRate=\(fileRate) nodePlaying=\(node.isPlaying) no-player-time"
+        }
+        return "pos=\(position) dur=\(duration) playing=\(isPlaying) sampleTime=\(playerTime.sampleTime) playerRate=\(playerTime.sampleRate) fileRate=\(fileRate) nodePlaying=\(node.isPlaying)"
+    }
+
     func refreshPosition() {
-        guard isPlaying, let file, let nodeTime = node.lastRenderTime,
-              let playerTime = node.playerTime(forNodeTime: nodeTime) else { return }
-        let rate = file.processingFormat.sampleRate
-        guard rate > 0 else { return }
-        let played = Double(playerTime.sampleTime) / rate
-        position = min(duration, max(0, origin + played))
+        guard isPlaying, !scrubbing, let nodeTime = node.lastRenderTime,
+              let playerTime = node.playerTime(forNodeTime: nodeTime),
+              playerTime.sampleRate > 0 else { return }
+        let sample = playerTime.sampleTime
+        let rate = playerTime.sampleRate
+        let now = ProcessInfo.processInfo.systemUptime
+        if let anchor = clockAnchorSample, let anchorTime = clockAnchorUptime {
+            let elapsed = Double(sample - anchor) / rate
+            let wall = now - anchorTime
+            if sample < anchor || abs(elapsed - wall) > 0.35 {
+                clockAnchorSample = sample
+                clockAnchorUptime = now
+            } else {
+                position = min(duration, max(0, origin + elapsed))
+            }
+        } else {
+            clockAnchorSample = sample
+            clockAnchorUptime = now
+        }
+        guard renderQueued, position >= duration - 0.01 else { return }
+        renderQueued = false
+        if loopIsOn(), !userPaused, playbackAllowed() {
+            position = 0
+            origin = 0
+            playFromCurrent()
+            return
+        }
+        position = duration
+        isPlaying = false
+        userPaused = true
+        if node.isPlaying {
+            node.stop()
+        }
+        clearClockAnchor()
+        onChange()
     }
 
     private func connect(_ file: AVAudioFile) {
@@ -136,9 +220,10 @@ final class PlaybackController {
             onChange()
             return
         }
-        if node.isPlaying {
-            node.stop()
-        }
+        // pause() keeps the old segment queued. Stop clears it so play starts at this position.
+        node.stop()
+        renderQueued = false
+        clearClockAnchor()
         origin = Double(startFrame) / rate
         playGeneration += 1
         let generation = playGeneration
@@ -149,7 +234,9 @@ final class PlaybackController {
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: AVAudioFrameCount(remaining), at: nil) { [weak self] in
                 DispatchQueue.main.async {
                     guard let self, self.playGeneration == generation else { return }
-                    self.finished()
+                    self.renderQueued = true
+                    self.refreshPosition()
+                    self.watchRenderTail()
                 }
             }
             node.play()
@@ -161,23 +248,38 @@ final class PlaybackController {
         }
     }
 
+    private func watchRenderTail() {
+        guard renderQueued, isPlaying else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, self.renderQueued, self.isPlaying else { return }
+            self.refreshPosition()
+            self.watchRenderTail()
+        }
+    }
+
+    private func placeScrub(_ fraction: Double) {
+        guard duration > 0 else { return }
+        position = clamped(fraction) * duration
+        origin = position
+        onChange()
+    }
+
+    private func clamped(_ fraction: Double) -> Double {
+        min(max(fraction, 0), 1)
+    }
+
+    private func clearClockAnchor() {
+        clockAnchorSample = nil
+        clockAnchorUptime = nil
+    }
+
     private func pauseEngine() {
+        renderQueued = false
         refreshPosition()
         if node.isPlaying {
             node.pause()
         }
         isPlaying = false
-        onChange()
-    }
-
-    private func finished() {
-        guard isPlaying else { return }
-        position = duration
-        isPlaying = false
-        userPaused = true
-        if node.isPlaying {
-            node.stop()
-        }
         onChange()
     }
 }
