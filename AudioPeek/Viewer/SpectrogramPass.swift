@@ -61,6 +61,11 @@ enum OverviewEstimate {
 }
 
 enum SlaneyMel {
+    struct Run {
+        var startBin: Int
+        var weights: [Float]
+    }
+
     static func hzToMel(_ hz: Double) -> Double {
         let spacing = 200.0 / 3
         let minLogHz = 1000.0
@@ -83,7 +88,7 @@ enum SlaneyMel {
         return spacing * mel
     }
 
-    static func weights(sampleRate: Double, nFFT: Int, nMels: Int, fmin: Double, fmax: Double) -> [Float] {
+    static func weights(sampleRate: Double, nFFT: Int, nMels: Int, fmin: Double, fmax: Double) -> [Run] {
         let freqBins = nFFT / 2 + 1
         let melMin = hzToMel(fmin)
         let melMax = hzToMel(fmax)
@@ -92,24 +97,58 @@ enum SlaneyMel {
             let mel = melMin + (melMax - melMin) * Double(index) / Double(nMels + 1)
             melHz[index] = melToHz(mel)
         }
-        var bank = [Float](repeating: 0, count: nMels * freqBins)
+        var runs = [Run]()
+        runs.reserveCapacity(nMels)
         for band in 0..<nMels {
             let rise = melHz[band + 1] - melHz[band]
             let fall = melHz[band + 2] - melHz[band + 1]
+            var scaled = [Float](repeating: 0, count: freqBins)
             for bin in 0..<freqBins {
                 let freq = Double(bin) * sampleRate / Double(nFFT)
                 let lower = rise == 0 ? 0 : (freq - melHz[band]) / rise
                 let upper = fall == 0 ? 0 : (melHz[band + 2] - freq) / fall
-                bank[band * freqBins + bin] = Float(max(0, min(lower, upper)))
+                scaled[bin] = Float(max(0, min(lower, upper)))
             }
             let width = melHz[band + 2] - melHz[band]
-            guard width > 0 else { continue }
+            guard width > 0 else {
+                runs.append(Run(startBin: 0, weights: []))
+                continue
+            }
             let scale = Float(2 / width)
+            var startBin: Int?
+            var lastBin = 0
             for bin in 0..<freqBins {
-                bank[band * freqBins + bin] *= scale
+                scaled[bin] *= scale
+                if scaled[bin] > 0 {
+                    if startBin == nil { startBin = bin }
+                    lastBin = bin
+                }
+            }
+            if let startBin {
+                runs.append(Run(startBin: startBin, weights: Array(scaled[startBin...lastBin])))
+            } else {
+                runs.append(Run(startBin: 0, weights: []))
             }
         }
-        return bank
+        return runs
+    }
+
+    static func dot(power: [Float], runs: [Run]) -> [Float] {
+        var bands = [Float](repeating: 0, count: runs.count)
+        power.withUnsafeBufferPointer { powerPointer in
+            guard let powerBase = powerPointer.baseAddress else { return }
+            for (band, run) in runs.enumerated() {
+                let count = run.weights.count
+                guard count > 0 else { continue }
+                var sum: Float = 0
+                run.weights.withUnsafeBufferPointer { weightPointer in
+                    guard let weightBase = weightPointer.baseAddress else { return }
+                    vDSP_dotpr(weightBase, 1, powerBase + run.startBin, 1, &sum, vDSP_Length(count))
+                }
+                bands[band] = sum
+            }
+        }
+        return bands
     }
 }
 
@@ -124,7 +163,7 @@ final class SpectrogramAccumulator {
     private let nFFT: Int
     private let hop: Int
     private let window: [Float]
-    private let weights: [Float]?
+    private let melRuns: [SlaneyMel.Run]?
     private let setup: FFTSetup?
     private let log2n: vDSP_Length
     private var pending: [[Float]]
@@ -145,6 +184,10 @@ final class SpectrogramAccumulator {
     }
     private var hopIndex = 0
     private var powers: [Float]
+    private var windowed: [Float]
+    private var splitReal: [Float]
+    private var splitImag: [Float]
+    private var spectrum: [Float]
     private var highestColumn = -1
 
     init?(job: SpectrogramJob, sampleRate: Double, channels: Int, totalFrames: Int, columnCount: Int) {
@@ -159,7 +202,7 @@ final class SpectrogramAccumulator {
         frequencyBins = nFFT / 2 + 1
         if job.type == .mel {
             let high = job.resolvedFMax(sampleRate: sampleRate)
-            weights = SlaneyMel.weights(
+            melRuns = SlaneyMel.weights(
                 sampleRate: sampleRate,
                 nFFT: nFFT,
                 nMels: job.nMels,
@@ -168,7 +211,7 @@ final class SpectrogramAccumulator {
             )
             binCount = job.nMels
         } else {
-            weights = nil
+            melRuns = nil
             binCount = frequencyBins
         }
         var built = [Float](repeating: 0, count: nFFT)
@@ -196,6 +239,10 @@ final class SpectrogramAccumulator {
         pending = Array(repeating: Array(repeating: 0, count: pad), count: lanes)
         head = Array(repeating: 0, count: lanes)
         powers = Array(repeating: 0, count: lanes * columnCount * binCount)
+        windowed = [Float](repeating: 0, count: nFFT)
+        splitReal = [Float](repeating: 0, count: nFFT / 2)
+        splitImag = [Float](repeating: 0, count: nFFT / 2)
+        spectrum = [Float](repeating: 0, count: frequencyBins)
     }
 
     deinit {
@@ -261,12 +308,11 @@ final class SpectrogramAccumulator {
             let center = hopIndex * hop
             let column = min(columnCount - 1, center * columnCount / totalFrames)
             for lane in 0..<lanes {
-                var frame = [Float](repeating: 0, count: nFFT)
                 let start = head[lane]
                 for index in 0..<nFFT {
-                    frame[index] = pending[lane][start + index] * window[index]
+                    windowed[index] = pending[lane][start + index] * window[index]
                 }
-                let power = fftPower(frame)
+                let power = fftPower()
                 let values = project(power)
                 for bin in 0..<binCount {
                     let slot = ((lane * columnCount) + column) * binCount + bin
@@ -288,53 +334,40 @@ final class SpectrogramAccumulator {
     }
 
     private func project(_ power: [Float]) -> [Float] {
-        guard let weights else { return power }
-        var bands = [Float](repeating: 0, count: binCount)
-        power.withUnsafeBufferPointer { powerPointer in
-            weights.withUnsafeBufferPointer { weightPointer in
-                guard let powerBase = powerPointer.baseAddress, let weightBase = weightPointer.baseAddress else { return }
-                for band in 0..<binCount {
-                    var sum: Float = 0
-                    vDSP_dotpr(weightBase + band * frequencyBins, 1, powerBase, 1, &sum, vDSP_Length(frequencyBins))
-                    bands[band] = sum
-                }
-            }
-        }
-        return bands
+        guard let melRuns else { return power }
+        return SlaneyMel.dot(power: power, runs: melRuns)
     }
 
-    private func fftPower(_ frame: [Float]) -> [Float] {
+    private func fftPower() -> [Float] {
         if let setup {
-            return packedPower(frame, setup: setup)
+            packedPower(setup: setup)
+            return spectrum
         }
+        let frame = windowed
         return directPower(frame)
     }
 
-    private func packedPower(_ frame: [Float], setup: FFTSetup) -> [Float] {
+    private func packedPower(setup: FFTSetup) {
         let half = nFFT / 2
-        var real = [Float](repeating: 0, count: half)
-        var imag = [Float](repeating: 0, count: half)
         for index in 0..<half {
-            real[index] = frame[index * 2]
-            imag[index] = frame[index * 2 + 1]
+            splitReal[index] = windowed[index * 2]
+            splitImag[index] = windowed[index * 2 + 1]
         }
-        real.withUnsafeMutableBufferPointer { realPointer in
-            imag.withUnsafeMutableBufferPointer { imagPointer in
+        splitReal.withUnsafeMutableBufferPointer { realPointer in
+            splitImag.withUnsafeMutableBufferPointer { imagPointer in
                 var split = DSPSplitComplex(realp: realPointer.baseAddress!, imagp: imagPointer.baseAddress!)
                 vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
             }
         }
-        var power = [Float](repeating: 0, count: half + 1)
-        power[0] = real[0] * real[0]
-        power[half] = imag[0] * imag[0]
+        spectrum[0] = splitReal[0] * splitReal[0]
+        spectrum[half] = splitImag[0] * splitImag[0]
         if half > 1 {
             for index in 1..<half {
-                let re = real[index] * 0.5
-                let im = imag[index] * 0.5
-                power[index] = re * re + im * im
+                let re = splitReal[index] * 0.5
+                let im = splitImag[index] * 0.5
+                spectrum[index] = re * re + im * im
             }
         }
-        return power
     }
 
     private func directPower(_ frame: [Float]) -> [Float] {
