@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         )
         appMenu.addItem(.separator())
-        let settings = NSMenuItem(title: "Settings", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        let settings = NSMenuItem(title: "AudioPeek Settings", action: #selector(showSettings(_:)), keyEquivalent: ",")
         settings.target = self
         appMenu.addItem(settings)
         appMenu.addItem(.separator())

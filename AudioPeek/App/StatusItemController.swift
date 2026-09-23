@@ -42,7 +42,7 @@ final class StatusItemController: NSObject {
         button?.image = PlaywaveMark.menuBarImage()
         button?.imagePosition = .imageOnly
         let menu = NSMenu()
-        let settings = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: "")
+        let settings = NSMenuItem(title: "AudioPeek Settings", action: #selector(openSettings(_:)), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

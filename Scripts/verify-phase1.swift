@@ -152,7 +152,7 @@ func settingsWindowID() -> CGWindowID? {
     for window in info {
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let title = window[kCGWindowName as String] as? String ?? ""
-        if owner == "AudioPeek" && title == "Settings" {
+        if owner == "AudioPeek" && title == "AudioPeek Settings" {
             return window[kCGWindowNumber as String] as? CGWindowID
         }
     }
@@ -277,7 +277,7 @@ let freshBlob = defaultsValue(fresh.suite, "settingsBlob")
 Check.expect(freshBlob.0 == false, "fresh blob not written yet")
 Check.expect(state["activationPolicy"]?.string == "accessory", "fresh activation accessory")
 Check.expect(state["statusItemVisible"]?.bool == true, "fresh status item visible")
-Check.expect(state["statusMenuTitles"]?.strings == ["Settings", "Quit"], "status menu \(state["statusMenuTitles"]?.strings ?? [])")
+Check.expect(state["statusMenuTitles"]?.strings == ["AudioPeek Settings", "Quit"], "status menu \(state["statusMenuTitles"]?.strings ?? [])")
 Check.expect(state["settingsWindowVisible"]?.bool == false, "first launch does not open settings")
 let freshType = lsappinfoType()
 print("lsappinfo fresh:\n\(freshType)")

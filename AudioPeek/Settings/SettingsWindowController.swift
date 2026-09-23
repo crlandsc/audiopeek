@@ -93,7 +93,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Settings"
+        window.title = "AudioPeek Settings"
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 420, height: 480)
