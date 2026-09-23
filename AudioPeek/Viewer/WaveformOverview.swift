@@ -229,6 +229,7 @@ enum WaveformReader {
             let totalFrames = accumulator.totalFrames
             let columns = max(columnCount, 1)
             var fileFrame = 0
+            var decoderFrame = 0
             while fileFrame < totalFrames {
                 if chunks > 0, !proceed(.betweenChunks) {
                     return WaveformReadResult(stop: .cancelled, chunks: chunks, opened: true, accumulator: accumulator)
@@ -236,9 +237,32 @@ enum WaveformReader {
                 let columnEnd = min(totalFrames, (min(columns - 1, fileFrame * columns / totalFrames) + 1) * totalFrames / columns)
                 let take = min(inspectPerColumn, max(0, columnEnd - fileFrame))
                 if take > 0 {
-                    var position = Int64(fileFrame)
-                    if ExtAudioFileSeek(audioFile, position) != noErr {
-                        return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
+                    let gap = fileFrame - decoderFrame
+                    if gap > 0, gap < 4 * inspectPerColumn {
+                        var remaining = gap
+                        while remaining > 0 {
+                            var list = AudioBufferList(
+                                mNumberBuffers: 1,
+                                mBuffers: AudioBuffer(
+                                    mNumberChannels: UInt32(channels),
+                                    mDataByteSize: UInt32(sampleCapacity * MemoryLayout<Float>.size),
+                                    mData: data
+                                )
+                            )
+                            var frames = UInt32(min(remaining, Int(framesPerChunk)))
+                            let status = ExtAudioFileRead(audioFile, &frames, &list)
+                            if status != noErr || frames == 0 {
+                                return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
+                            }
+                            remaining -= Int(frames)
+                        }
+                        decoderFrame = fileFrame
+                    } else if gap >= 4 * inspectPerColumn {
+                        var position = Int64(fileFrame)
+                        if ExtAudioFileSeek(audioFile, position) != noErr {
+                            return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
+                        }
+                        decoderFrame = fileFrame
                     }
                     var list = AudioBufferList(
                         mNumberBuffers: 1,
@@ -261,6 +285,7 @@ enum WaveformReader {
                             accumulator.skip(frames: Int(frames))
                         }
                     }
+                    decoderFrame += Int(frames)
                 }
                 if accumulator.framesSeen < columnEnd {
                     accumulator.skip(frames: columnEnd - accumulator.framesSeen)
