@@ -162,7 +162,7 @@ Folders inside the app target, not extra packages:
 - **Analysis**: chunked decode, STFT, and mel on a background queue. A selection change discards the in-flight pass. Pressure pauses it (see Machine load). On that queue, call `ExtAudioFileOpenURL` and check cancel between every `ExtAudioFileRead`.
 - **Settings**: SwiftUI form, one UserDefaults blob. The engine rereads that blob when settings change and at the start of the next analysis pass. The remembered window frame lives in that blob. The volume slider is a separate persisted value.
 
-The process is an `LSUIElement` menu-bar extra. No Dock icon by default. The status item is shown by default and can be hidden. Its menu is Settings and Quit. Playback and analysis stay in-process. The app is not sandboxed.
+The process is an `LSUIElement` menu-bar extra. No Dock icon by default. The status item is shown by default and can be hidden. It shows the play mark and does not show the name. Its menu is Settings and Quit. The app icon is that same mark. Playback and analysis stay in-process. The app is not sandboxed.
 
 Start at login is a settings toggle. On the first successful open of exactly one audio file, turn that toggle on and attempt `SMAppService` once. That open is the first useful launch. If registration fails for any reason, not only `kSMErrorInvalidSignature`, the toggle stays on and tells the person to add AudioPeek under Login Items (`SMAppService.openSystemSettingsLoginItems`). Do not write a LaunchAgent or add a helper. The README covers that path.
 
@@ -379,7 +379,7 @@ Sources: [Find out which hotkey and Finder-selection APIs need which permissions
 
 ## Distribution
 
-- Display name AudioPeek. The menu bar says AudioPeek. The standard About panel shows the name AudioPeek. Do not build a custom About window. The status item menu is Settings and Quit.
+- Display name AudioPeek. The menu bar shows the play mark and does not show the name. The app icon is that mark. The standard About panel shows the name AudioPeek. Do not build a custom About window. The status item menu is Settings and Quit.
 - Bundle id `com.landschoot.audiopeek`.
 - Public repo `https://github.com/crlandsc/audiopeek`.
 - MIT. Copyright line: `Copyright (c) 2026 Christopher Landschoot`.

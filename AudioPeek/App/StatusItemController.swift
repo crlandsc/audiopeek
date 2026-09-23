@@ -15,6 +15,18 @@ final class StatusItemController: NSObject {
         item?.menu?.items.map(\.title).filter { !$0.isEmpty } ?? []
     }
 
+    var statusImageIsTemplate: Bool {
+        item?.button?.image?.isTemplate == true
+    }
+
+    var statusImageSize: NSSize {
+        item?.button?.image?.size ?? .zero
+    }
+
+    var statusButtonTitle: String {
+        item?.button?.title ?? ""
+    }
+
     func setVisible(_ visible: Bool) {
         if visible {
             installIfNeeded()
@@ -25,14 +37,10 @@ final class StatusItemController: NSObject {
 
     private func installIfNeeded() {
         guard item == nil else { return }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let button = item.button
-        button?.title = "AudioPeek"
-        if let image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "AudioPeek") {
-            image.isTemplate = true
-            button?.image = image
-            button?.imagePosition = .imageLeading
-        }
+        button?.image = PlaywaveMark.menuBarImage()
+        button?.imagePosition = .imageOnly
         let menu = NSMenu()
         let settings = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: "")
         settings.target = self
