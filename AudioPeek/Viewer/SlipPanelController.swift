@@ -1,4 +1,5 @@
 import AppKit
+import AVFAudio
 
 final class SlipWindow: NSPanel {
     override var canBecomeKey: Bool { false }
