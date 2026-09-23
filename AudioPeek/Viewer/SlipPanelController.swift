@@ -31,6 +31,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var epoch = 0
     private var inFlight = false
     private var currentURL: URL?
+    private var openGeneration = 0
+    private var forcedPanelUp: Bool?
     private(set) var requestCount = 0
     private(set) var lastLoad = LoadSample(thermal: .nominal, cpuBusy: nil)
     var onActivity: () -> Void = {}
@@ -96,7 +98,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         applySettings()
     }
 
-    var isVisible: Bool { panel?.isVisible ?? false }
+    var isVisible: Bool { forcedPanelUp ?? (panel?.isVisible ?? false) }
 
     var pollScheduled: Bool { pollTimer?.isValid == true }
 
@@ -277,6 +279,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        openGeneration += 1
         epoch += 1
         inFlight = false
         stopPoll()
@@ -401,12 +404,56 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         onActivity()
     }
 
+    nonisolated static func shouldConnectOpen(
+        generation: Int,
+        currentGeneration: Int,
+        url: URL,
+        currentURL: URL?,
+        panelUp: Bool
+    ) -> Bool {
+        generation == currentGeneration && currentURL == url && panelUp
+    }
+
     private func beginOpen(_ url: URL) {
         content.filenameLabel.stringValue = url.lastPathComponent
-        guard playback.open(url: url) != nil else {
+        openGeneration += 1
+        let generation = openGeneration
+        playback.stop()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let read = PlaybackController.readFile(at: url)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.finishOpen(url: url, generation: generation, read: read)
+                }
+            }
+        }
+    }
+
+    func stageOpenForTest(url: URL, generation: Int, panelUp: Bool) {
+        currentURL = url
+        openGeneration = generation
+        forcedPanelUp = panelUp
+    }
+
+    func deliverOpenForTest(url: URL, generation: Int, read: ReadAudio?) {
+        finishOpen(url: url, generation: generation, read: read)
+    }
+
+    private func finishOpen(url: URL, generation: Int, read: ReadAudio?) {
+        guard Self.shouldConnectOpen(
+            generation: generation,
+            currentGeneration: openGeneration,
+            url: url,
+            currentURL: currentURL,
+            panelUp: isVisible
+        ) else {
+            return
+        }
+        guard let read else {
             hide()
             return
         }
+        playback.install(read)
         refreshMetadata()
         playback.setGain(store.effectiveVolume)
         onFileOpened()
@@ -464,6 +511,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func stopPlayback() {
+        openGeneration += 1
         gateTimer?.invalidate()
         gateTimer = nil
         playheadTimer?.invalidate()
@@ -774,8 +822,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 
-    private func startOverviewNow() {
+    func startOverviewNow() {
         restartOverview?.cancel()
+        // The file is not connected yet. Leave whatever picture is up.
+        guard playback.info != nil else { return }
         guard isVisible, let url = currentURL else {
             cancelOverview()
             return

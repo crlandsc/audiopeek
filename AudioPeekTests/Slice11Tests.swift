@@ -353,6 +353,101 @@ final class Slice11Tests: XCTestCase {
         playback.stop()
     }
 
+    func testReadFileSucceedsOnABackgroundQueue() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-read-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 44_100)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let done = expectation(description: "read")
+        let box = ReadResult()
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.offMain = !Thread.isMainThread
+            box.info = PlaybackController.readFile(at: url)?.info
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 2)
+        XCTAssertTrue(box.offMain)
+        let info = try XCTUnwrap(box.info)
+        XCTAssertEqual(info.sampleRate, 44_100, accuracy: 0.1)
+        XCTAssertEqual(info.channels, 1)
+        XCTAssertEqual(info.duration, 1, accuracy: 0.02)
+    }
+
+    func testStaleGenerationDoesNotConnectOrStartTheOverview() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-stale-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 8_000)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let read = try XCTUnwrap(PlaybackController.readFile(at: url))
+        let other = URL(fileURLWithPath: "/tmp/audiopeek-other.wav")
+        XCTAssertFalse(SlipPanelController.shouldConnectOpen(
+            generation: 1,
+            currentGeneration: 2,
+            url: url,
+            currentURL: url,
+            panelUp: true
+        ))
+        XCTAssertFalse(SlipPanelController.shouldConnectOpen(
+            generation: 2,
+            currentGeneration: 2,
+            url: other,
+            currentURL: url,
+            panelUp: true
+        ))
+        XCTAssertFalse(SlipPanelController.shouldConnectOpen(
+            generation: 2,
+            currentGeneration: 2,
+            url: url,
+            currentURL: url,
+            panelUp: false
+        ))
+        let suite = "audiopeek.s5-stale-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let slip = SlipPanelController(
+            store: SettingsStore(defaults: defaults),
+            finder: IdleFinder(),
+            hotkey: HotkeyCenter(),
+            onOpenSettings: {}
+        )
+        slip.stageOpenForTest(url: url, generation: 2, panelUp: true)
+        var activity = 0
+        slip.onActivity = { activity += 1 }
+        slip.deliverOpenForTest(url: url, generation: 1, read: read)
+        let pumped = expectation(description: "stale open dropped")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            pumped.fulfill()
+        }
+        wait(for: [pumped], timeout: 1)
+        XCTAssertEqual(activity, 0)
+        XCTAssertEqual(slip.durationSeconds, 0)
+        XCTAssertFalse(slip.playbackRunning)
+        XCTAssertFalse(slip.overviewRunning)
+        XCTAssertEqual(slip.overviewFilled, 0)
+    }
+
+    func testNilInfoLeavesTheOverviewAlone() {
+        let suite = "audiopeek.s5-nil-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let slip = SlipPanelController(
+            store: SettingsStore(defaults: defaults),
+            finder: IdleFinder(),
+            hotkey: HotkeyCenter(),
+            onOpenSettings: {}
+        )
+        var activity = 0
+        slip.onActivity = { activity += 1 }
+        slip.startOverviewNow()
+        let pumped = expectation(description: "overview stayed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            pumped.fulfill()
+        }
+        wait(for: [pumped], timeout: 1)
+        XCTAssertEqual(activity, 0)
+        XCTAssertFalse(slip.overviewRunning)
+        XCTAssertEqual(slip.overviewFilled, 0)
+        XCTAssertEqual(slip.durationSeconds, 0)
+    }
+
     private func render(_ field: NSTextField, named name: String) throws {
         let width = max(field.frame.width, 1)
         let height: CGFloat = 24
@@ -412,4 +507,13 @@ final class Slice11Tests: XCTestCase {
         data.append(Data(count: frames * 2))
         try data.write(to: url)
     }
+}
+
+private final class ReadResult {
+    var info: OpenedAudio?
+    var offMain = false
+}
+
+private final class IdleFinder: FinderSelectionSource {
+    func requestSelection(_ completion: @escaping (FinderRead) -> Void) {}
 }
