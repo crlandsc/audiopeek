@@ -293,11 +293,13 @@ final class SpectrogramAccumulator {
 
     func paintedColumns() -> [[[Float]]] {
         let count = filledColumns
+        let source = powers
+        let bins = binCount
+        let columns = columnCount
         return (0..<lanes).map { lane in
             (0..<count).map { column in
-                (0..<binCount).map { bin in
-                    powers[((lane * columnCount) + column) * binCount + bin]
-                }
+                let start = ((lane * columns) + column) * bins
+                return Array(source[start..<(start + bins)])
             }
         }
     }

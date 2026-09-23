@@ -230,6 +230,167 @@ final class WaveformOverviewTests: XCTestCase {
         }
     }
 
+    func testSeveralChunksInsideTheWindowDeliverOnce() throws {
+        let chunks = 16
+        let steps = 6
+        let (overview, log, url) = try startStalled(chunks: chunks, steps: steps, spectrogram: overviewJob())
+        defer {
+            overview.cancel()
+            try? FileManager.default.removeItem(at: url)
+        }
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(spin(for: 0.3) { log.contains { $0.filled > 0 } })
+        let partials = log.all().filter { $0.filled > 0 && !$0.finished && !$0.paused }
+        XCTAssertEqual(partials.count, 1, "chunks inside the window delivered \(partials.map(\.filled))")
+        let partial = try XCTUnwrap(partials.first)
+        XCTAssertEqual(partial.filled, steps)
+        XCTAssertTrue(partial.running)
+        XCTAssertFalse(partial.finished)
+        let columns = try XCTUnwrap(partial.spectrogram.first)
+        XCTAssertFalse(columns.isEmpty)
+        XCTAssertGreaterThan(columns.joined().reduce(Float(0), +), 0)
+    }
+
+    func testALaterChunkDeliversAgain() throws {
+        let (overview, log, url) = try startStalled(chunks: 16, steps: 6, spectrogram: nil)
+        defer {
+            overview.cancel()
+            try? FileManager.default.removeItem(at: url)
+        }
+        Thread.sleep(forTimeInterval: 0.4)
+        XCTAssertTrue(spin(for: 0.3) { log.contains { $0.filled == 6 } })
+        let before = log.all().count
+        XCTAssertFalse(spin(for: 0.12) { log.all().count > before })
+        XCTAssertEqual(log.all().filter { $0.filled > 0 }.map(\.filled), [6])
+        let stepped = Date()
+        overview.step()
+        XCTAssertTrue(spin(for: 0.08) { log.contains { $0.filled >= 7 && !$0.finished } })
+        XCTAssertLessThan(Date().timeIntervalSince(stepped), 0.08)
+        let later = log.all().filter { $0.filled >= 7 && !$0.finished }
+        XCTAssertEqual(later.count, 1)
+        XCTAssertFalse(later[0].paused)
+    }
+
+    func testPauseAndFinishDeliverWithoutWaiting() throws {
+        let chunks = 16
+        let (overview, log, url) = try startStalled(chunks: chunks, steps: 6, spectrogram: nil)
+        defer {
+            overview.cancel()
+            try? FileManager.default.removeItem(at: url)
+        }
+        Thread.sleep(forTimeInterval: 0.4)
+        XCTAssertTrue(spin(for: 0.3) { log.contains { $0.filled == 6 } })
+        let pausedAt = Date()
+        overview.setWorkAllowed(false)
+        XCTAssertTrue(spin(for: 0.05) { log.contains { $0.paused && $0.filled == 6 } })
+        XCTAssertLessThan(Date().timeIntervalSince(pausedAt), 0.05)
+        overview.setWorkAllowed(true)
+        overview.setStallBetweenChunks(false)
+        Thread.sleep(forTimeInterval: 0.05)
+        XCTAssertTrue(spin(for: 0.02) { log.contains { $0.finished && $0.filled == chunks } })
+        let finished = try XCTUnwrap(log.all().last { $0.finished })
+        XCTAssertFalse(finished.paused)
+        XCTAssertEqual(finished.filled, chunks)
+        let partials = log.all().filter { $0.filled > 0 && !$0.finished && !$0.paused }
+        XCTAssertEqual(partials.count, 1)
+    }
+
+    func testFlushAfterCancelDoesNotApply() throws {
+        let chunks = 40
+        let (overview, log, url) = try startStalled(chunks: chunks, steps: 6, spectrogram: overviewJob())
+        defer {
+            overview.cancel()
+            try? FileManager.default.removeItem(at: url)
+        }
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(spin(for: 0.5) { log.contains { $0.filled == 6 && $0.running } })
+        let pass = try XCTUnwrap(log.all().last { $0.filled == 6 }?.passID)
+        let countBefore = log.all().count
+        overview.setStallBetweenChunks(false)
+        Thread.sleep(forTimeInterval: 0.04)
+        overview.cancel()
+        _ = spin(for: 0.3) { false }
+        let fresh = Array(log.all().dropFirst(countBefore))
+        XCTAssertFalse(fresh.contains { $0.passID == pass })
+        XCTAssertTrue(fresh.contains { !$0.running && !$0.finished && $0.filled == 0 })
+    }
+
+    private func startStalled(
+        chunks: Int,
+        steps: Int,
+        spectrogram: SpectrogramJob?
+    ) throws -> (WaveformOverview, SnapshotLog, URL) {
+        let url = try writeQuietWav(chunks: chunks)
+        let overview = WaveformOverview()
+        let log = SnapshotLog()
+        overview.onSnapshot = { log.append($0) }
+        overview.setStallBetweenChunks(true)
+        overview.start(
+            url: url,
+            columnCount: chunks,
+            waveformDual: false,
+            computeWaveform: true,
+            spectrogram: spectrogram
+        )
+        for _ in 0..<steps {
+            overview.step()
+        }
+        return (overview, log, url)
+    }
+
+    private func overviewJob() -> SpectrogramJob {
+        SpectrogramJob(
+            dual: false,
+            type: .linear,
+            nFFT: 2048,
+            hop: 512,
+            window: .hann,
+            nMels: 1,
+            fmin: 0,
+            fmax: nil,
+            decibels: false,
+            dbFloor: -80,
+            dbRange: 80
+        )
+    }
+
+    private func writeQuietWav(chunks: Int) throws -> URL {
+        var samples = [Int16](repeating: 0, count: chunks * 8192)
+        samples[0] = 32767
+        return try writeWav(frames: samples)
+    }
+
+    @discardableResult
+    private func spin(for interval: TimeInterval, until match: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(interval)
+        while Date() < deadline {
+            if match() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.005))
+        }
+        return match()
+    }
+
+    private final class SnapshotLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [WaveformSnapshot] = []
+
+        func append(_ snapshot: WaveformSnapshot) {
+            lock.lock()
+            items.append(snapshot)
+            lock.unlock()
+        }
+
+        func all() -> [WaveformSnapshot] {
+            lock.lock()
+            defer { lock.unlock() }
+            return items
+        }
+
+        func contains(where match: (WaveformSnapshot) -> Bool) -> Bool {
+            all().contains(where: match)
+        }
+    }
+
     private func writeWav(frames: [Int16]) throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-wave-\(UUID().uuidString).wav")
         var data = Data()
