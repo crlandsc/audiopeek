@@ -292,8 +292,10 @@ Check.expect(state["previewSpaceRegistered"]?.bool == true, "space toggles play 
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
 Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback")
+Check.expect(state["audioEngineRunning"]?.bool == false, "space stops the audio engine")
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
+Check.expect(state["audioEngineRunning"]?.bool == true, "space starts the audio engine")
 Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback")
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
 Check.expect(abs((state["slipFrameHeight"]?.double ?? 0) - 500) < 1, "first height 500, got \(state["slipFrameHeight"]?.double ?? 0)")

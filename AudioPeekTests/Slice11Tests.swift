@@ -307,6 +307,40 @@ final class Slice11Tests: XCTestCase {
         playback.stop()
     }
 
+    func testPauseStopsTheEngineAndPlayContinuesFromThere() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-engine-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 44_100 * 4)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let playback = PlaybackController()
+        playback.setGain(0)
+        XCTAssertNotNil(playback.open(url: url))
+        playback.toggle()
+        let started = Date()
+        while playback.position < 0.35, Date().timeIntervalSince(started) < 2 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            playback.refreshPosition()
+        }
+        XCTAssertTrue(playback.engine.isRunning)
+        let pausedAt = playback.position
+        XCTAssertGreaterThan(pausedAt, 0.2, playback.clockDescription)
+        playback.toggle()
+        XCTAssertFalse(playback.isPlaying)
+        XCTAssertFalse(playback.engine.isRunning)
+        XCTAssertEqual(playback.position, pausedAt, accuracy: 0.15, playback.clockDescription)
+        playback.toggle()
+        XCTAssertTrue(playback.isPlaying)
+        XCTAssertTrue(playback.engine.isRunning)
+        XCTAssertEqual(playback.position, pausedAt, accuracy: 0.15, playback.clockDescription)
+        let resumed = playback.position
+        let resumedAt = Date()
+        while Date().timeIntervalSince(resumedAt) < 0.35 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            playback.refreshPosition()
+        }
+        XCTAssertGreaterThan(playback.position, resumed + 0.05, playback.clockDescription)
+        playback.stop()
+    }
+
     func testScrubStaysSilentUntilTheMouseIsReleased() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-scrub-\(UUID().uuidString).wav")
         try writeWav(to: url, frames: 44_100 * 4)

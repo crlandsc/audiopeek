@@ -95,6 +95,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.onAppearance = { [weak self] in
             self?.onActivity()
         }
+        content.onRevealTargetRaised = { [weak self] in
+            self?.ensurePlayheadTimer()
+        }
         applySettings()
     }
 
@@ -131,6 +134,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var playClicks: Int { content.playClicks }
 
     var playbackRunning: Bool { playback.isPlaying }
+
+    var audioEngineRunning: Bool { playback.engine.isRunning }
 
     var playheadSeconds: TimeInterval { playback.position }
 
@@ -285,6 +290,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         stopPoll()
         stopPlayback()
         cancelOverview()
+        retirePlayheadTimerIfIdle()
         hotkey.setEscapeEnabled(false)
         hotkey.setPreviewSpaceEnabled(false)
         if let panel {
@@ -464,6 +470,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func togglePlay() {
         playback.toggle()
+        if playback.isPlaying {
+            ensurePlayheadTimer()
+        }
         evaluateGate()
         syncPlayhead()
     }
@@ -496,26 +505,35 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             RunLoop.main.add(timer, forMode: .common)
             gateTimer = timer
         }
-        if playheadTimer == nil {
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.content.advanceReveal()
-                    guard self.playback.isPlaying else { return }
+        ensurePlayheadTimer()
+    }
+
+    private func ensurePlayheadTimer() {
+        if playheadTimer != nil { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.content.advanceReveal()
+                if self.playback.isPlaying {
                     self.syncPlayhead()
                 }
+                self.retirePlayheadTimerIfIdle()
             }
-            RunLoop.main.add(timer, forMode: .common)
-            playheadTimer = timer
         }
+        RunLoop.main.add(timer, forMode: .common)
+        playheadTimer = timer
+    }
+
+    private func retirePlayheadTimerIfIdle() {
+        guard !playback.isPlaying, content.revealCaughtUp else { return }
+        playheadTimer?.invalidate()
+        playheadTimer = nil
     }
 
     private func stopPlayback() {
         openGeneration += 1
         gateTimer?.invalidate()
         gateTimer = nil
-        playheadTimer?.invalidate()
-        playheadTimer = nil
         playback.stop()
         content.setPlaying(false)
         content.setPlayhead(fraction: 0)
@@ -652,13 +670,21 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             retainedSpectrogram = merged.spectrogram
         }
         overviewSnapshot = merged
+        let waveformBefore = content.waveformPane.revealTarget
+        let spectrogramBefore = content.spectrogramPane.revealTarget
         content.setWaveform(
             snapshot: merged,
             amplitude: store.blob.waveformAmplitude,
             color: store.blob.waveformColor
         )
-        if shouldRefreshSpectrogram(merged) {
+        let paintsSpectrogram = shouldRefreshSpectrogram(merged)
+        if paintsSpectrogram {
             paintSpectrogram()
+        }
+        let spectrogramColumns = CGFloat(merged.spectrogram.first?.count ?? 0)
+        if content.waveformPane.revealTarget > waveformBefore
+            || (paintsSpectrogram && spectrogramColumns > spectrogramBefore) {
+            ensurePlayheadTimer()
         }
         content.setProgress(visible: progressVisible, fraction: merged.progress)
         onActivity()
