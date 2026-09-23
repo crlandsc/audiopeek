@@ -164,6 +164,102 @@ final class SpectrogramPassTests: XCTestCase {
         XCTAssertEqual(mel.first?.count, 128)
     }
 
+    func testSparseMelDotMatchesDenseWhenTheFootIsFractional() {
+        let sampleRate = 8000.0
+        let nFFT = 512
+        let nMels = 128
+        let fmin = 1000.0
+        let fmax = 4000.0
+        let freqBins = nFFT / 2 + 1
+        let runs = SlaneyMel.weights(
+            sampleRate: sampleRate,
+            nFFT: nFFT,
+            nMels: nMels,
+            fmin: fmin,
+            fmax: fmax
+        )
+        let dense = denseSlaneyWeights(
+            sampleRate: sampleRate,
+            nFFT: nFFT,
+            nMels: nMels,
+            fmin: fmin,
+            fmax: fmax
+        )
+        let melMin = SlaneyMel.hzToMel(fmin)
+        let melMax = SlaneyMel.hzToMel(fmax)
+        var melHz = [Double](repeating: 0, count: nMels + 2)
+        for index in 0..<(nMels + 2) {
+            let mel = melMin + (melMax - melMin) * Double(index) / Double(nMels + 1)
+            melHz[index] = SlaneyMel.melToHz(mel)
+        }
+        var power = [Float](repeating: 0, count: freqBins)
+        for bin in 0..<freqBins {
+            power[bin] = 1 + Float(bin % 5) * 0.25
+        }
+        let sparse = SlaneyMel.dot(power: power, runs: runs)
+        var sawFractionalFoot = false
+        XCTAssertEqual(runs.count, nMels)
+        XCTAssertEqual(sparse.count, nMels)
+        for band in 0..<nMels {
+            let left = melHz[band] * Double(nFFT) / sampleRate
+            let right = melHz[band + 2] * Double(nFFT) / sampleRate
+            let footIsFractional = abs(left - left.rounded()) > 0.05 || abs(right - right.rounded()) > 0.05
+            let run = runs[band]
+            var denseSum: Float = 0
+            for bin in 0..<freqBins {
+                let weight = dense[band * freqBins + bin]
+                denseSum += weight * power[bin]
+                if weight > 0 {
+                    let offset = bin - run.startBin
+                    XCTAssertGreaterThanOrEqual(offset, 0)
+                    XCTAssertLessThan(offset, run.weights.count)
+                    XCTAssertEqual(run.weights[offset], weight)
+                    if footIsFractional, weight < 1 {
+                        sawFractionalFoot = true
+                    }
+                }
+            }
+            XCTAssertEqual(sparse[band], denseSum, accuracy: 1e-5)
+        }
+        XCTAssertTrue(sawFractionalFoot)
+        let zeroWidth = SlaneyMel.weights(
+            sampleRate: sampleRate,
+            nFFT: 32,
+            nMels: 3,
+            fmin: 1000,
+            fmax: 1000
+        )
+        XCTAssertEqual(zeroWidth.count, 3)
+        XCTAssertTrue(zeroWidth.allSatisfy { $0.weights.isEmpty })
+    }
+
+    func testDualDrainOfDifferentSamplesDoesNotComeOutEqual() throws {
+        let frames = 4096
+        let engine = try XCTUnwrap(
+            SpectrogramAccumulator(
+                job: factoryJob(dual: true),
+                sampleRate: 44100,
+                channels: 2,
+                totalFrames: frames,
+                columnCount: 8
+            )
+        )
+        var samples = [Float](repeating: 0, count: frames * 2)
+        for frame in 0..<frames {
+            samples[frame * 2] = sin(2 * Float.pi * 440 * Float(frame) / 44100)
+            samples[frame * 2 + 1] = sin(2 * Float.pi * 1760 * Float(frame) / 44100) * 0.25
+        }
+        samples.withUnsafeBufferPointer { buffer in
+            engine.ingest(base: buffer.baseAddress!, frames: frames, channels: 2)
+        }
+        engine.finish()
+        let columns = engine.allColumns()
+        XCTAssertEqual(columns.count, 2)
+        XCTAssertGreaterThan(columns[0].joined().reduce(Float(0), +), 0)
+        XCTAssertGreaterThan(columns[1].joined().reduce(Float(0), +), 0)
+        XCTAssertNotEqual(columns[0], columns[1])
+    }
+
     private func factoryJob(hop: Int = 512, dual: Bool = false) -> SpectrogramJob {
         SpectrogramJob(
             dual: dual,
@@ -178,6 +274,41 @@ final class SpectrogramPassTests: XCTestCase {
             dbFloor: -80,
             dbRange: 80
         )
+    }
+
+    private func denseSlaneyWeights(
+        sampleRate: Double,
+        nFFT: Int,
+        nMels: Int,
+        fmin: Double,
+        fmax: Double
+    ) -> [Float] {
+        let freqBins = nFFT / 2 + 1
+        let melMin = SlaneyMel.hzToMel(fmin)
+        let melMax = SlaneyMel.hzToMel(fmax)
+        var melHz = [Double](repeating: 0, count: nMels + 2)
+        for index in 0..<(nMels + 2) {
+            let mel = melMin + (melMax - melMin) * Double(index) / Double(nMels + 1)
+            melHz[index] = SlaneyMel.melToHz(mel)
+        }
+        var bank = [Float](repeating: 0, count: nMels * freqBins)
+        for band in 0..<nMels {
+            let rise = melHz[band + 1] - melHz[band]
+            let fall = melHz[band + 2] - melHz[band + 1]
+            for bin in 0..<freqBins {
+                let freq = Double(bin) * sampleRate / Double(nFFT)
+                let lower = rise == 0 ? 0 : (freq - melHz[band]) / rise
+                let upper = fall == 0 ? 0 : (melHz[band + 2] - freq) / fall
+                bank[band * freqBins + bin] = Float(max(0, min(lower, upper)))
+            }
+            let width = melHz[band + 2] - melHz[band]
+            guard width > 0 else { continue }
+            let scale = Float(2 / width)
+            for bin in 0..<freqBins {
+                bank[band * freqBins + bin] *= scale
+            }
+        }
+        return bank
     }
 
     private func writeWav(frames: [Int16], to url: URL) throws {
