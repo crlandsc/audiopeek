@@ -367,6 +367,14 @@ final class WaveformOverview: @unchecked Sendable {
     private var inFlight = 0
     private var peakPasses = 0
     private var snapshot = WaveformSnapshot.empty
+    private var chunkDeliveredOnce = false
+    private var deliverNextChunkNow = false
+    private var lastChunkDeliveredAt = Date.distantPast
+    private var coalescedFlush: DispatchWorkItem?
+    private var deliveryQueued = false
+    private var deliverySnapshot: WaveformSnapshot?
+    private var deliveryToken = 0
+    private let chunkPublishInterval: TimeInterval = 0.1
 
     var isActive: Bool {
         lock.lock()
@@ -396,19 +404,20 @@ final class WaveformOverview: @unchecked Sendable {
     }
 
     func cancel() {
+        let token: Int
         let published: WaveformSnapshot
         lock.lock()
         generation += 1
+        token = generation
         liveEngine?.cancelled = true
         let peak = peakPasses
         snapshot = .empty
         snapshot.peakPasses = peak
+        resetPublishWindowLocked()
         published = snapshot
         lock.unlock()
         wake.signal()
-        DispatchQueue.main.async { [weak self] in
-            self?.onSnapshot(published)
-        }
+        deliver(published, token: token)
     }
 
     func start(url: URL, columnCount: Int, waveformDual: Bool, computeWaveform: Bool, spectrogram: SpectrogramJob?, inspectPerColumn: Int = 0) {
@@ -418,6 +427,7 @@ final class WaveformOverview: @unchecked Sendable {
         generation += 1
         liveEngine?.cancelled = true
         token = generation
+        resetPublishWindowLocked()
         snapshot = WaveformSnapshot(
             passID: token,
             lanes: [],
@@ -536,19 +546,20 @@ final class WaveformOverview: @unchecked Sendable {
             let stall = stallBetweenChunks
             let ready = pendingSteps > 0
             if allowed && (!stall || ready) {
-                if stall { pendingSteps -= 1 }
+                if stall {
+                    pendingSteps -= 1
+                    deliverNextChunkNow = true
+                }
                 let wasPaused = snapshot.paused
                 snapshot.paused = false
-                let copy = snapshot
                 lock.unlock()
-                if wasPaused { deliver(copy, token: token) }
+                if wasPaused { deliverFresh(token) }
                 return true
             }
             let wasPaused = snapshot.paused
             if !allowed { snapshot.paused = true }
-            let copy = snapshot
             lock.unlock()
-            if !allowed && !wasPaused { deliver(copy, token: token) }
+            if !allowed && !wasPaused { deliverFresh(token) }
             _ = wake.wait(timeout: .now() + 0.2)
         }
     }
@@ -561,7 +572,6 @@ final class WaveformOverview: @unchecked Sendable {
         includeWaveform: Bool
     ) {
         guard isCurrent(token) else { return }
-        let painted = spectrogram?.paintedColumns() ?? []
         let progress = accumulator?.progress ?? (finished ? 1 : 0)
         lock.lock()
         guard token == generation else {
@@ -579,22 +589,112 @@ final class WaveformOverview: @unchecked Sendable {
             snapshot.filled = 0
         }
         snapshot.progress = progress
-        snapshot.spectrogram = painted
         snapshot.running = !finished
         snapshot.paused = false
         snapshot.finished = finished
         snapshot.peakPasses = peakPasses
+        let now = Date()
+        let windowElapsed = now.timeIntervalSince(lastChunkDeliveredAt) >= chunkPublishInterval
+        let deliverNow = finished || !chunkDeliveredOnce || deliverNextChunkNow || windowElapsed
+        if !finished {
+            chunkDeliveredOnce = true
+        }
+        if deliverNow {
+            deliverNextChunkNow = false
+            cancelFlushLocked()
+            if !finished {
+                lastChunkDeliveredAt = now
+            }
+            lock.unlock()
+            emit(spectrogram, token: token)
+            return
+        }
+        if coalescedFlush == nil {
+            let delay = chunkPublishInterval - now.timeIntervalSince(lastChunkDeliveredAt)
+            let work = DispatchWorkItem { [weak self] in
+                self?.flushCoalesced(token)
+            }
+            coalescedFlush = work
+            queue.asyncAfter(deadline: .now() + max(0, delay), execute: work)
+        }
+        lock.unlock()
+    }
+
+    private func flushCoalesced(_ token: Int) {
+        let engine: SpectrogramAccumulator?
+        lock.lock()
+        coalescedFlush = nil
+        guard token == generation else {
+            lock.unlock()
+            return
+        }
+        engine = liveEngine
+        lastChunkDeliveredAt = Date()
+        lock.unlock()
+        emit(engine, token: token)
+    }
+
+    private func deliverFresh(_ token: Int) {
+        let engine: SpectrogramAccumulator?
+        lock.lock()
+        guard token == generation else {
+            lock.unlock()
+            return
+        }
+        cancelFlushLocked()
+        engine = liveEngine
+        lock.unlock()
+        emit(engine, token: token)
+    }
+
+    private func emit(_ engine: SpectrogramAccumulator?, token: Int) {
+        let painted = engine?.paintedColumns() ?? []
+        lock.lock()
+        guard token == generation else {
+            lock.unlock()
+            return
+        }
+        snapshot.spectrogram = painted
         let copy = snapshot
         lock.unlock()
         deliver(copy, token: token)
     }
 
     private func deliver(_ snapshot: WaveformSnapshot, token: Int) {
+        lock.lock()
+        deliverySnapshot = snapshot
+        deliveryToken = token
+        let schedule = !deliveryQueued
+        deliveryQueued = true
+        lock.unlock()
+        guard schedule else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard self.isCurrent(token) else { return }
-            self.onSnapshot(snapshot)
+            self?.applyPendingDelivery()
         }
+    }
+
+    private func applyPendingDelivery() {
+        lock.lock()
+        let snapshot = deliverySnapshot
+        let token = deliveryToken
+        deliverySnapshot = nil
+        deliveryQueued = false
+        lock.unlock()
+        guard let snapshot else { return }
+        guard isCurrent(token) else { return }
+        onSnapshot(snapshot)
+    }
+
+    private func resetPublishWindowLocked() {
+        chunkDeliveredOnce = false
+        deliverNextChunkNow = false
+        lastChunkDeliveredAt = .distantPast
+        cancelFlushLocked()
+    }
+
+    private func cancelFlushLocked() {
+        coalescedFlush?.cancel()
+        coalescedFlush = nil
     }
 
     private var liveEngine: SpectrogramAccumulator?
