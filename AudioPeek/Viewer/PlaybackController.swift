@@ -7,6 +7,11 @@ struct OpenedAudio: Equatable {
     var duration: TimeInterval
 }
 
+struct ReadAudio {
+    var file: AVAudioFile
+    var info: OpenedAudio
+}
+
 @MainActor
 final class PlaybackController {
     private let engine = AVAudioEngine()
@@ -32,29 +37,40 @@ final class PlaybackController {
         engine.attach(node)
     }
 
-    func open(url: URL) -> OpenedAudio? {
-        stop()
+    nonisolated static func readFile(at url: URL) -> ReadAudio? {
         do {
             let file = try AVAudioFile(forReading: url)
             let rate = file.processingFormat.sampleRate
             guard rate > 0, file.length > 0 else { return nil }
-            self.file = file
-            duration = Double(file.length) / rate
-            position = 0
-            origin = 0
-            info = OpenedAudio(
-                sampleRate: rate,
-                channels: Int(file.processingFormat.channelCount),
-                duration: duration
+            let duration = Double(file.length) / rate
+            return ReadAudio(
+                file: file,
+                info: OpenedAudio(
+                    sampleRate: rate,
+                    channels: Int(file.processingFormat.channelCount),
+                    duration: duration
+                )
             )
-            connect(file)
-            return info
         } catch {
-            file = nil
-            info = nil
-            duration = 0
             return nil
         }
+    }
+
+    func open(url: URL) -> OpenedAudio? {
+        stop()
+        guard let read = Self.readFile(at: url) else { return nil }
+        install(read)
+        return info
+    }
+
+    func install(_ read: ReadAudio) {
+        stop()
+        file = read.file
+        duration = read.info.duration
+        position = 0
+        origin = 0
+        info = read.info
+        connect(read.file)
     }
 
     func setGain(_ value: Double) {
