@@ -432,7 +432,8 @@ final class SlipContentView: NSView {
         fmax: Double,
         decibels: Bool,
         dbFloor: Double,
-        dbRange: Double
+        dbRange: Double,
+        colorMap: SpectrogramColorMap
     ) {
         spectrogramPane.setSpectrogram(
             columns: columns,
@@ -444,7 +445,8 @@ final class SlipContentView: NSView {
             fmax: fmax,
             decibels: decibels,
             dbFloor: dbFloor,
-            dbRange: dbRange
+            dbRange: dbRange,
+            colorMap: colorMap
         )
     }
 
@@ -462,6 +464,8 @@ enum ScrubPhase {
 
 final class SlipPaneView: NSView {
     var onScrub: ((Double, ScrubPhase) -> Void)?
+    private let imageQueue = DispatchQueue(label: "com.landschoot.audiopeek.spectrogram-image")
+    private let buildLock = NSLock()
     private var lanes: [[WaveformColumn]] = []
     private var columnCount = 0
     private var amplitude = WaveformAmplitude.linear
@@ -502,13 +506,14 @@ final class SlipPaneView: NSView {
         fmax: Double,
         decibels: Bool,
         dbFloor: Double,
-        dbRange: Double
+        dbRange: Double,
+        colorMap: SpectrogramColorMap
     ) {
         spectrogramColumnCount = max(totalColumns, columns.first?.count ?? 0)
-        spectrogramBuild += 1
-        let build = spectrogramBuild
+        let build = nextSpectrogramBuild()
         let captured = columns
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        imageQueue.async { [weak self] in
+            guard let self, self.isCurrentSpectrogramBuild(build) else { return }
             let images = SpectrogramImage.make(
                 columns: captured,
                 type: type,
@@ -518,10 +523,11 @@ final class SlipPaneView: NSView {
                 fmax: fmax,
                 decibels: decibels,
                 dbFloor: dbFloor,
-                dbRange: dbRange
+                dbRange: dbRange,
+                colorMap: colorMap
             )
             DispatchQueue.main.async {
-                guard let self, self.spectrogramBuild == build else { return }
+                guard self.isCurrentSpectrogramBuild(build) else { return }
                 self.spectrogramImages = images
                 self.setRevealTarget(images.first?.width ?? 0)
                 self.needsDisplay = true
@@ -532,10 +538,25 @@ final class SlipPaneView: NSView {
     func clearSpectrogram() {
         spectrogramImages = []
         spectrogramColumnCount = 0
-        spectrogramBuild += 1
+        _ = nextSpectrogramBuild()
         revealedColumns = 0
         targetColumns = 0
         needsDisplay = true
+    }
+
+    private func nextSpectrogramBuild() -> Int {
+        buildLock.lock()
+        spectrogramBuild += 1
+        let build = spectrogramBuild
+        buildLock.unlock()
+        return build
+    }
+
+    private func isCurrentSpectrogramBuild(_ build: Int) -> Bool {
+        buildLock.lock()
+        let current = spectrogramBuild == build
+        buildLock.unlock()
+        return current
     }
 
     func advanceReveal() {
@@ -712,39 +733,6 @@ extension SlipContentView {
     }
 }
 
-enum MagmaColor {
-    private static let stops: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.00146, 0.00047, 0.01387),
-        (0.02815, 0.02115, 0.13640),
-        (0.11300, 0.04180, 0.31400),
-        (0.23200, 0.05900, 0.46800),
-        (0.37000, 0.08200, 0.54100),
-        (0.51600, 0.10500, 0.52800),
-        (0.66500, 0.15400, 0.48600),
-        (0.79600, 0.23400, 0.42600),
-        (0.89200, 0.34600, 0.35600),
-        (0.95200, 0.48200, 0.31800),
-        (0.98200, 0.62200, 0.35200),
-        (0.99400, 0.76400, 0.46800),
-        (0.99100, 0.89200, 0.64600),
-        (0.98705, 0.99144, 0.74950),
-    ]
-
-    static func components(_ unit: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
-        let clamped = min(1, max(0, unit))
-        let scaled = clamped * CGFloat(stops.count - 1)
-        let index = min(stops.count - 2, Int(scaled))
-        let fraction = scaled - CGFloat(index)
-        let start = stops[index]
-        let end = stops[index + 1]
-        return (
-            start.0 + (end.0 - start.0) * fraction,
-            start.1 + (end.1 - start.1) * fraction,
-            start.2 + (end.2 - start.2) * fraction
-        )
-    }
-}
-
 enum SpectrogramImage {
     static func make(
         columns: [[[Float]]],
@@ -755,7 +743,8 @@ enum SpectrogramImage {
         fmax: Double,
         decibels: Bool,
         dbFloor: Double,
-        dbRange: Double
+        dbRange: Double,
+        colorMap: SpectrogramColorMap = .magma
     ) -> [CGImage] {
         guard let first = columns.first, let bins = first.first?.count, bins > 0 else { return [] }
         let width = first.count
@@ -783,7 +772,8 @@ enum SpectrogramImage {
                 decibels: decibels,
                 dbFloor: dbFloor,
                 dbRange: dbRange,
-                peak: peak
+                peak: peak,
+                colorMap: colorMap
             )
         }
     }
@@ -799,7 +789,8 @@ enum SpectrogramImage {
         decibels: Bool,
         dbFloor: Double,
         dbRange: Double,
-        peak: Float
+        peak: Float,
+        colorMap: SpectrogramColorMap
     ) -> CGImage? {
         let width = lane.count
         let height = min(bins, 256)
@@ -824,7 +815,7 @@ enum SpectrogramImage {
                     dbRange: dbRange,
                     peak: peak
                 )
-                let color = MagmaColor.components(unit)
+                let color = colorMap.components(unit)
                 let offset = (row * width + column) * 4
                 pixels[offset] = UInt8(color.0 * 255)
                 pixels[offset + 1] = UInt8(color.1 * 255)

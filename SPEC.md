@@ -222,7 +222,7 @@ Sources: [Settle the destination and the first design decisions](https://linear.
 
 Follow the system appearance (`NSApp.effectiveAppearance` or equivalent), including a live change while the overlay is up. Both light and dark are required. There is no in-app light/dark toggle and no appearance knob in settings. An OS appearance change does not restart the overview pass and must not hitch playback.
 
-Spectrogram colormap is magma, the magma used on the Slip bundle in the prototype.
+The factory spectrogram colors are magma. Settings can also use inferno, viridis, or gray. Changing colors redraws the current picture and does not start a new overview pass.
 
 The playhead is a 1 px vertical hairline on both panes. No grabber, no riding dot. Use the Slip playhead color from the prototype stylesheet (the volume slider accent uses that same color there).
 

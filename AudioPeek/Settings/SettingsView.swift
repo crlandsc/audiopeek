@@ -139,6 +139,12 @@ struct SettingsView: View {
                             Text("Log frequency").tag(SpectrogramType.logFrequency)
                             Text("Mel").tag(SpectrogramType.mel)
                         }
+                        Picker("Colors", selection: store.binding(\.spectrogram.colorMap)) {
+                            Text("Magma").tag(SpectrogramColorMap.magma)
+                            Text("Inferno").tag(SpectrogramColorMap.inferno)
+                            Text("Viridis").tag(SpectrogramColorMap.viridis)
+                            Text("Gray").tag(SpectrogramColorMap.gray)
+                        }
                         IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT))
                         IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop))
                         Picker("Window", selection: store.binding(\.spectrogram.window)) {

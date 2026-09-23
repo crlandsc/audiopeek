@@ -129,7 +129,20 @@ final class SpectrogramAccumulator {
     private let log2n: vDSP_Length
     private var pending: [[Float]]
     private var head: [Int]
-    var cancelled = false
+    private let cancelLock = NSLock()
+    private var cancelFlag = false
+    var cancelled: Bool {
+        get {
+            cancelLock.lock()
+            defer { cancelLock.unlock() }
+            return cancelFlag
+        }
+        set {
+            cancelLock.lock()
+            cancelFlag = newValue
+            cancelLock.unlock()
+        }
+    }
     private var hopIndex = 0
     private var powers: [Float]
     private var highestColumn = -1

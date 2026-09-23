@@ -128,6 +128,17 @@ final class Slice11Tests: XCTestCase {
         XCTAssertFalse(SettingsBlob.factory.loopEnabled)
     }
 
+    func testMissingColorMapDecodesAsMagma() throws {
+        let data = try JSONEncoder().encode(SettingsBlob.factory)
+        var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        var spectrogram = object["spectrogram"] as! [String: Any]
+        spectrogram.removeValue(forKey: "colorMap")
+        object["spectrogram"] = spectrogram
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(SettingsBlob.self, from: stripped)
+        XCTAssertEqual(decoded.spectrogram.colorMap, .magma)
+    }
+
     func testLoopRestartsAtTheEndAndAPauseStaysPaused() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-loop-\(UUID().uuidString).wav")
         try writeWav(to: url, frames: 8_000)

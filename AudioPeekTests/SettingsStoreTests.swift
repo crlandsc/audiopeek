@@ -78,7 +78,8 @@ final class SettingsStoreTests: XCTestCase {
                 fmax: 8000,
                 decibelsEnabled: false,
                 dbFloor: -60,
-                dbRange: 40
+                dbRange: 40,
+                colorMap: .magma
             )
         }
         XCTAssertTrue(store.resetKnobs())

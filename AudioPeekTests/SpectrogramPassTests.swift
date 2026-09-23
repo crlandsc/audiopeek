@@ -58,6 +58,29 @@ final class SpectrogramPassTests: XCTestCase {
         XCTAssertGreaterThan(result.accumulator?.completedColumns ?? 0, 0)
     }
 
+    func testACancelledPassStopsBeforePaintingColumns() throws {
+        let engine = try XCTUnwrap(
+            SpectrogramAccumulator(job: factoryJob(), sampleRate: 44100, channels: 1, totalFrames: 8192, columnCount: 8)
+        )
+        engine.cancelled = true
+        let samples = [Float](repeating: 0.2, count: 4096)
+        samples.withUnsafeBufferPointer { buffer in
+            engine.ingest(base: buffer.baseAddress!, frames: 4096, channels: 1)
+        }
+        XCTAssertEqual(engine.filledColumns, 0)
+    }
+
+    func testColorMapsStayDistinctAndGrayRunsFromBlackToWhite() {
+        let black = SpectrogramColorMap.gray.components(0)
+        let white = SpectrogramColorMap.gray.components(1)
+        XCTAssertEqual(Double(black.0), 0, accuracy: 0.001)
+        XCTAssertEqual(Double(white.0), 1, accuracy: 0.001)
+        let magma = SpectrogramColorMap.magma.components(0.4)
+        let viridis = SpectrogramColorMap.viridis.components(0.4)
+        XCTAssertGreaterThan(abs(Double(magma.0 - viridis.0)), 0.05)
+        XCTAssertEqual(SettingsBlob.factory.spectrogram.colorMap, .magma)
+    }
+
     func testInvalidKnobsDoNotBuildAndDualKeepsTwoLanes() {
         let invalid = factoryJob(hop: 0)
         XCTAssertFalse(invalid.isValid(sampleRate: 44100))

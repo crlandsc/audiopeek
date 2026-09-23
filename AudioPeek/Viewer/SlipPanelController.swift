@@ -644,7 +644,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             fmax: min(settings.fmax ?? nyquist, nyquist),
             decibels: settings.decibelsEnabled,
             dbFloor: settings.dbFloor,
-            dbRange: settings.dbRange
+            dbRange: settings.dbRange,
+            colorMap: settings.colorMap
         )
     }
 
@@ -667,7 +668,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             fmax: min(settings.fmax ?? nyquist, nyquist),
             decibels: settings.decibelsEnabled,
             dbFloor: settings.dbFloor,
-            dbRange: settings.dbRange
+            dbRange: settings.dbRange,
+            colorMap: settings.colorMap
         )
         content.setProgress(visible: progressVisible, fraction: overviewSnapshot.progress)
     }

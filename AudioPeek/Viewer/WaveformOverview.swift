@@ -374,6 +374,7 @@ final class WaveformOverview: @unchecked Sendable {
         let published: WaveformSnapshot
         lock.lock()
         generation += 1
+        liveEngine?.cancelled = true
         let peak = peakPasses
         snapshot = .empty
         snapshot.peakPasses = peak
@@ -390,6 +391,7 @@ final class WaveformOverview: @unchecked Sendable {
         let published: WaveformSnapshot
         lock.lock()
         generation += 1
+        liveEngine?.cancelled = true
         token = generation
         snapshot = WaveformSnapshot(
             passID: token,
@@ -434,7 +436,11 @@ final class WaveformOverview: @unchecked Sendable {
         inspectPerColumn: Int
     ) {
         enterPass()
-        defer { leavePass() }
+        var trackedEngine: SpectrogramAccumulator?
+        defer {
+            forgetLiveEngine(trackedEngine)
+            leavePass()
+        }
         let box = SpectrogramBox()
         let result = WaveformReader.read(
             url: url,
@@ -472,6 +478,8 @@ final class WaveformOverview: @unchecked Sendable {
                         totalFrames: pictured,
                         columnCount: columnCount
                     )
+                    trackedEngine = box.engine
+                    self.rememberLiveEngine(box.engine)
                 }
                 box.engine?.ingest(base: base, frames: frames, channels: channels)
             },
@@ -527,6 +535,7 @@ final class WaveformOverview: @unchecked Sendable {
         finished: Bool,
         includeWaveform: Bool
     ) {
+        guard isCurrent(token) else { return }
         let painted = spectrogram?.paintedColumns() ?? []
         let progress = accumulator?.progress ?? (finished ? 1 : 0)
         lock.lock()
@@ -561,6 +570,22 @@ final class WaveformOverview: @unchecked Sendable {
             guard self.isCurrent(token) else { return }
             self.onSnapshot(snapshot)
         }
+    }
+
+    private var liveEngine: SpectrogramAccumulator?
+
+    private func rememberLiveEngine(_ engine: SpectrogramAccumulator?) {
+        lock.lock()
+        liveEngine = engine
+        lock.unlock()
+    }
+
+    private func forgetLiveEngine(_ engine: SpectrogramAccumulator?) {
+        lock.lock()
+        if liveEngine === engine {
+            liveEngine = nil
+        }
+        lock.unlock()
     }
 
     private func isCurrent(_ token: Int) -> Bool {
