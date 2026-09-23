@@ -152,6 +152,84 @@ final class WaveformOverviewTests: XCTestCase {
         XCTAssertLessThan(published[0], 4)
     }
 
+    func testCoarseReadKeepsTheQuietHeadWhenTheColumnRunsPastTheWindow() throws {
+        let inspectPerColumn = 512
+        let span = inspectPerColumn + 400
+        let columns = 3
+        let quiet: Int16 = 1600
+        let loud: Int16 = 28000
+        var samples = [Int16](repeating: loud, count: span * columns)
+        for column in 0..<columns {
+            let start = column * span
+            for frame in start..<(start + inspectPerColumn) {
+                samples[frame] = quiet
+            }
+        }
+        let url = try writeWav(frames: samples)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var chunks = 0
+        let result = WaveformReader.read(
+            url: url,
+            columnCount: columns,
+            dual: false,
+            chunkFrames: 8192,
+            proceed: { _ in true },
+            onChunk: { _ in chunks += 1 },
+            inspectPerColumn: inspectPerColumn
+        )
+        XCTAssertEqual(result.stop, .finished)
+        XCTAssertEqual(result.chunks, columns)
+        XCTAssertEqual(chunks, columns)
+        let picture = try XCTUnwrap(result.accumulator)
+        let scale: Float = 32768
+        let quietPeak = Float(quiet) / scale
+        for column in 0..<columns {
+            let peak = picture.column(lane: 0, column: column)
+            XCTAssertEqual(peak.minimum, quietPeak, accuracy: 0.002)
+            XCTAssertEqual(peak.maximum, quietPeak, accuracy: 0.002)
+        }
+    }
+
+    func testCoarseReadMatchesTheHeadWhenTheColumnFitsTheWindow() throws {
+        let span = 100
+        let columns = 3
+        var samples = [Int16](repeating: 0, count: span * columns)
+        for column in 0..<columns {
+            let start = column * span
+            samples[start] = Int16(-(column + 1) * 1000)
+            samples[start + span / 2] = Int16((column + 1) * 1500)
+            samples[start + span - 1] = Int16((column + 1) * 800)
+        }
+        let url = try writeWav(frames: samples)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let scale: Float = 32768
+        for inspectPerColumn in [span, span + 80] {
+            var chunks = 0
+            let result = WaveformReader.read(
+                url: url,
+                columnCount: columns,
+                dual: false,
+                chunkFrames: 8192,
+                proceed: { _ in true },
+                onChunk: { _ in chunks += 1 },
+                inspectPerColumn: inspectPerColumn
+            )
+            XCTAssertEqual(result.stop, .finished)
+            XCTAssertEqual(result.chunks, columns)
+            XCTAssertEqual(chunks, columns)
+            let picture = try XCTUnwrap(result.accumulator)
+            for column in 0..<columns {
+                let start = column * span
+                let head = samples[start..<(start + span)]
+                let low = try XCTUnwrap(head.min())
+                let high = try XCTUnwrap(head.max())
+                let peak = picture.column(lane: 0, column: column)
+                XCTAssertEqual(peak.minimum, Float(low) / scale, accuracy: 0.002)
+                XCTAssertEqual(peak.maximum, Float(high) / scale, accuracy: 0.002)
+            }
+        }
+    }
+
     private func writeWav(frames: [Int16]) throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-wave-\(UUID().uuidString).wav")
         var data = Data()
