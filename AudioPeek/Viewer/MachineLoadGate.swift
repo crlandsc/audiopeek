@@ -31,9 +31,13 @@ final class MachineLoadGate {
 
     func allowsPlayback(_ sample: LoadSample) -> Bool {
         let thermalOK = sample.thermal == .nominal || sample.thermal == .fair
-        guard thermalOK, let cpu = sample.cpuBusy else {
+        guard thermalOK else {
             blocked = true
             return false
+        }
+        guard let cpu = sample.cpuBusy else {
+            if blocked { return false }
+            return true
         }
         if cpu >= 0.85 {
             blocked = true

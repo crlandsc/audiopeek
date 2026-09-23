@@ -28,6 +28,34 @@ final class MachineLoadGateTests: XCTestCase {
         XCTAssertTrue(gate.allowsPlayback(gate.sample()))
     }
 
+    func testNilCPUOnNominalDoesNotLatch() {
+        let nominal = MachineLoadGate()
+        XCTAssertTrue(nominal.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: nil)))
+        XCTAssertTrue(nominal.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: 0.75)))
+
+        let fair = MachineLoadGate()
+        XCTAssertTrue(fair.allowsPlayback(LoadSample(thermal: .fair, cpuBusy: nil)))
+        XCTAssertTrue(fair.allowsPlayback(LoadSample(thermal: .fair, cpuBusy: 0.75)))
+    }
+
+    func testNilCPUOnSeriousBlocks() {
+        let serious = MachineLoadGate()
+        XCTAssertFalse(serious.allowsPlayback(LoadSample(thermal: .serious, cpuBusy: nil)))
+        XCTAssertFalse(serious.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: 0.75)))
+
+        let critical = MachineLoadGate()
+        XCTAssertFalse(critical.allowsPlayback(LoadSample(thermal: .critical, cpuBusy: nil)))
+        XCTAssertFalse(critical.allowsPlayback(LoadSample(thermal: .fair, cpuBusy: 0.75)))
+    }
+
+    func testNilCPUWhileAlreadyBlockedDoesNotClear() {
+        let gate = MachineLoadGate()
+        XCTAssertFalse(gate.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: 0.9)))
+        XCTAssertFalse(gate.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: nil)))
+        XCTAssertFalse(gate.allowsPlayback(LoadSample(thermal: .fair, cpuBusy: 0.75)))
+        XCTAssertTrue(gate.allowsPlayback(LoadSample(thermal: .nominal, cpuBusy: 0.7)))
+    }
+
     func testSystemSamplerReadsOneCPUWindow() {
         var sampler = SystemLoadSampler()
         let first = sampler.sample()

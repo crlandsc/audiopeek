@@ -195,6 +195,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var frame: NSRect { panel?.frame ?? .zero }
 
     func viewerHotkey() {
+        // Discarded. Stores the first host_statistics tick. The gate decides on a later sample.
+        _ = gate.sample()
         if isVisible {
             hide()
             return
