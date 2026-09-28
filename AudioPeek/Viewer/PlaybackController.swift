@@ -292,13 +292,14 @@ final class PlaybackController {
     private func pauseEngine() {
         renderQueued = false
         refreshPosition()
+        playGeneration += 1
         if node.isPlaying {
             node.pause()
         }
+        isPlaying = false
         if engine.isRunning {
             engine.stop()
         }
-        isPlaying = false
         onChange()
     }
 }

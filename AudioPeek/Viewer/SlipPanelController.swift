@@ -28,6 +28,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var pollTimer: Timer?
     private var gateTimer: Timer?
     private var playheadTimer: Timer?
+    private var playToggleOpen = true
     private var frameSave: DispatchWorkItem?
     private var epoch = 0
     private var inFlight = false
@@ -470,12 +471,21 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func togglePlay() {
+        // Stopping the engine drains the run loop, so one click can arrive twice.
+        // The second pass would see a pause and start playback again.
+        guard playToggleOpen else { return }
+        playToggleOpen = false
         playback.toggle()
         if playback.isPlaying {
             ensurePlayheadTimer()
         }
         evaluateGate()
         syncPlayhead()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.playToggleOpen = true
+            }
+        }
     }
 
     private func evaluateGate() {
