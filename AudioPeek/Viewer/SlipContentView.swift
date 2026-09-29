@@ -605,7 +605,6 @@ final class SlipContentView: NSView {
     let hoverPollInterval: TimeInterval = 1.0 / 60.0
     private var hoverTimer: Timer?
     private var hoverCursorHeld = false
-    private var previousFront: NSRunningApplication?
     var hoverPollIsRunning: Bool { hoverTimer?.isValid == true }
 
     override var isFlipped: Bool { true }
@@ -933,29 +932,14 @@ final class SlipContentView: NSView {
     }
 
     private func applyHoverCursor(_ cursor: NSCursor?) {
+        guard NSApp.isActive else { return }
         let resize = cursor.flatMap { $0 === NSCursor.arrow ? nil : $0 }
         guard let resize else {
-            restoreFrontApp()
             endHoverCursor()
             return
         }
-        // Finder owns the cursor while it is front, and it ignores both
-        // NSCursor.set and CGDisplayHideCursor from an inactive app.
-        // Take activation only for the resize zone, then give it back.
-        if previousFront == nil, !NSApp.isActive {
-            previousFront = NSWorkspace.shared.frontmostApplication
-            NSApp.activate(ignoringOtherApps: true)
-        }
         resize.set()
         hoverCursorHeld = true
-    }
-
-    private func restoreFrontApp() {
-        guard let previous = previousFront else { return }
-        previousFront = nil
-        if previous.bundleIdentifier != Bundle.main.bundleIdentifier {
-            previous.activate(options: [])
-        }
     }
 
     private func endHoverCursor() {
