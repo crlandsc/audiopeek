@@ -287,6 +287,8 @@ final class TestBridge: NSObject {
             let mode = userInfo["mode"] as? String ?? "paths"
             let paths = strings("paths", in: userInfo)
             scriptedFinder?.set(mode: mode, paths: paths)
+        case "setFrontApp":
+            slip.setInjectedFrontBundleID(userInfo["bundleID"] as? String)
         case "pressPlay":
             slip.pressPlay()
         case "setLoad":
