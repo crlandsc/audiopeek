@@ -288,7 +288,8 @@ Check.expect(state["escapeHotkeyRegistered"]?.bool == true, "escape is registere
 Check.expect(openedPlaying, "opening the panel starts playback")
 Check.expect(state["panelCanBecomeKey"]?.bool == false, "the open panel does not become key")
 Check.expect(state["panelIsKey"]?.bool == false, "Finder keeps the key window")
-Check.expect(state["previewSpaceRegistered"]?.bool == true, "space toggles play while the preview is open")
+state = command("setFrontApp", extra: ["bundleID": "com.apple.finder"])
+Check.expect(state["previewSpaceRegistered"]?.bool == true, "space toggles play while the panel is visible and Finder is front")
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
 Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback")
@@ -297,6 +298,23 @@ state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
 Check.expect(state["audioEngineRunning"]?.bool == true, "space starts the audio engine")
 Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback")
+
+state = command("setFrontApp", extra: ["bundleID": "com.apple.Safari"])
+Check.expect(state["slipVisible"]?.bool == true, "the panel stays up when Finder is not front")
+Check.expect(state["previewSpaceRegistered"]?.bool == false, "space is unregistered when Finder is not front")
+Check.expect(state["escapeHotkeyRegistered"]?.bool == true, "escape stays registered when Finder is not front")
+state = command("setFrontApp", extra: ["bundleID": "com.apple.finder"])
+Check.expect(state["slipVisible"]?.bool == true, "the panel stays up when Finder is front again")
+Check.expect(state["previewSpaceRegistered"]?.bool == true, "space is registered again when Finder is front")
+state = command("dispatchPreviewSpace")
+state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
+Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback again")
+Check.expect(state["audioEngineRunning"]?.bool == false, "space stops the audio engine again")
+state = command("dispatchPreviewSpace")
+state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
+Check.expect(state["audioEngineRunning"]?.bool == true, "space starts the audio engine again")
+Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback again")
+
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
 Check.expect(abs((state["slipFrameHeight"]?.double ?? 0) - 500) < 1, "first height 500, got \(state["slipFrameHeight"]?.double ?? 0)")
 

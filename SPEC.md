@@ -144,7 +144,7 @@ Verification:
 
 ## What it is
 
-AudioPeek is a personal macOS tool being open sourced. It shows a configurable waveform and spectrogram, and plays the audio, for the file selected in Finder. A custom hotkey opens it. While the preview is open, space toggles play and Finder's arrow keys still move the selection.
+AudioPeek is a personal macOS tool being open sourced. It shows a configurable waveform and spectrogram, and plays the audio, for the file selected in Finder. A custom hotkey opens it. Space toggles play while the panel is visible and Finder is front, and is unregistered otherwise. Finder's arrow keys still move the selection.
 
 Version 1 is a written product with one job: view and play. It is a quick Finder preview, not an analysis tool. People who want zoom already have better tools.
 
@@ -206,7 +206,7 @@ Sources: [Decide the app architecture and how the pieces fit](https://linear.app
 
 Autoplay when the overlay opens on exactly one supported audio file, and when Finder moves onto a new one. The playhead starts at 0. Playback and the overview start together. Playback continues while the picture fills or recomputes. Do not delay play until the picture finishes.
 
-The overlay has a mouse play/pause control. While it is visible, bare space toggles play through a Carbon hotkey. The panel does not become key, so Finder's arrow keys still change the selection. That space hotkey is removed when the panel hides, and it is not the viewer hotkey.
+The overlay has a mouse play/pause control. Bare space toggles play through a Carbon hotkey while the panel is visible and Finder is front, and is unregistered otherwise. The panel does not become key, so Finder's arrow keys still change the selection. That space hotkey is not the viewer hotkey.
 
 Click or drag a visible waveform or spectrogram to seek. While the mouse is down, playback stays silent and the playhead follows the pointer. On release, playback resumes only if it was playing before the drag. A paused file stays paused. Dragging the header moves the window. If no pane is shown, seek does nothing. No zoom. Loop is a header toggle, off by default. With loop off, the end pauses with the playhead at the end, and pressing play from there starts at 0. With loop on, the end starts again at 0 when the machine-load gate allows it.
 
@@ -367,7 +367,7 @@ Sources: [Decide whether version 1 ships a Quick Look extension for types Apple 
 
 Version 1 asks for one privacy grant: Automation for Finder, the first time a hotkey reads the selection.
 
-**Hotkey.** Carbon `RegisterEventHotKey`. The handler returns immediately. It does not wait on Finder, open, or decode. No Accessibility and no Input Monitoring. Factory combo is Option-Space. The same combo may be registered by other processes; rebind is the way out. Do not register bare space as the viewer hotkey. While the panel is visible, a separate Carbon hotkey may take bare space for play/pause, and it is unregistered when the panel hides. Do not use `NSEvent` global monitors or a `CGEvent` tap in version 1.
+**Hotkey.** Carbon `RegisterEventHotKey`. The handler returns immediately. It does not wait on Finder, open, or decode. No Accessibility and no Input Monitoring. Factory combo is Option-Space. The same combo may be registered by other processes; rebind is the way out. Do not register bare space as the viewer hotkey. A separate Carbon hotkey takes bare space for play/pause while the panel is visible and Finder is front, and is unregistered otherwise. Do not use `NSEvent` global monitors or a `CGEvent` tap in version 1.
 
 **Selection.** Apple Events to Finder's `selection`, via Scripting Bridge or a compiled Apple Event. Do not compile an `NSAppleScript` on every hotkey. Do not walk Finder's UI with Accessibility. If Automation is denied or the event fails, stop retrying and say so in the existing settings window (enable AudioPeek for Finder). Offer an Open Automation button that opens System Settings > Privacy & Security > Automation. Do not fall through to Accessibility. Info.plist includes `NSAppleEventsUsageDescription` so the prompt can appear. The app is not sandboxed. Version 1 leaves Hardened Runtime off. Do not turn it on in version 1. With Hardened Runtime on, Apple Events fail quietly unless `com.apple.security.automation.apple-events` is set.
 

@@ -35,6 +35,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var currentURL: URL?
     private var openGeneration = 0
     private var forcedPanelUp: Bool?
+    private var appliedPreviewSpace = false
+    private var injectedFrontBundleID: String?
     private(set) var requestCount = 0
     private(set) var lastLoad = LoadSample(thermal: .nominal, cpuBusy: nil)
     var onActivity: () -> Void = {}
@@ -100,7 +102,17 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.onRevealTargetRaised = { [weak self] in
             self?.ensurePlayheadTimer()
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(frontApplicationActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
         applySettings()
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     var isVisible: Bool { forcedPanelUp ?? (panel?.isVisible ?? false) }
@@ -294,10 +306,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         cancelOverview()
         retirePlayheadTimerIfIdle()
         hotkey.setEscapeEnabled(false)
-        hotkey.setPreviewSpaceEnabled(false)
         if let panel {
             panel.orderOut(nil)
         }
+        applyPreviewSpacePolicy()
         onActivity()
     }
 
@@ -402,8 +414,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         if !window.isVisible {
             window.orderFrontRegardless()
             hotkey.setEscapeEnabled(true)
-            hotkey.setPreviewSpaceEnabled(true)
             startPoll()
+            applyPreviewSpacePolicy()
         }
         if changed || playback.duration == 0 {
             beginOpen(url)
@@ -420,6 +432,36 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         panelUp: Bool
     ) -> Bool {
         generation == currentGeneration && currentURL == url && panelUp
+    }
+
+    nonisolated static func shouldRegisterPreviewSpace(panelVisible: Bool, frontBundleID: String?) -> Bool {
+        panelVisible && frontBundleID == "com.apple.finder"
+    }
+
+    func setInjectedFrontBundleID(_ bundleID: String?) {
+        injectedFrontBundleID = bundleID
+        applyPreviewSpacePolicy()
+    }
+
+    @objc private func frontApplicationActivated(_: Notification) {
+        applyPreviewSpacePolicy()
+    }
+
+    private func applyPreviewSpacePolicy() {
+        let enabled = Self.shouldRegisterPreviewSpace(
+            panelVisible: panel?.isVisible ?? false,
+            frontBundleID: frontBundleID()
+        )
+        guard enabled != appliedPreviewSpace else { return }
+        appliedPreviewSpace = enabled
+        hotkey.setPreviewSpaceEnabled(enabled)
+    }
+
+    private func frontBundleID() -> String? {
+        if let injectedFrontBundleID {
+            return injectedFrontBundleID
+        }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
     private func beginOpen(_ url: URL) {
