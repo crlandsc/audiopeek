@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController!
     private var hotkeyCenter: HotkeyCenter!
     private var slip: SlipPanelController!
+    private var pendingOpens: [[URL]] = []
     private var scriptedFinder: ScriptedFinderSelection?
     private var registeredCombo: HotkeyCombo?
     private(set) var hotkeyFactoryFellBack = false
@@ -64,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSettings()
             }
         )
+        deliverPendingOpens()
         hotkeyCenter.onViewer = { [weak self] in
             self?.slip.viewerHotkey()
         }
@@ -147,6 +149,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // A cold launch can deliver the open before slip exists.
+        // open App.app also delivers the bundle itself once document types exist. That is not a dropped file.
+        let files = urls.filter { !isApplicationBundle($0) }
+        guard !files.isEmpty else { return }
+        pendingOpens.append(files)
+        deliverPendingOpens()
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    private func isApplicationBundle(_ url: URL) -> Bool {
+        let bundle = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = url.resolvingSymlinksInPath().standardizedFileURL
+        return candidate.path == bundle.path
+    }
+
+    private func deliverPendingOpens() {
+        guard let slip else { return }
+        while !pendingOpens.isEmpty {
+            let urls = pendingOpens.removeFirst()
+            slip.openFiles(urls)
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard store != nil else { return false }
         openSettings()
@@ -155,9 +184,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openSettings() {
-        settingsWindow.show()
-        NSApp.activate()
+        // Document types make Launch Services activate a second open as a regular app.
+        // Putting the Dock policy back to accessory unmaps a window ordered front before that change.
         applyChrome()
+        NSApp.activate()
+        settingsWindow.show()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.settingsWindow != nil else { return }
+                self.settingsWindow.show()
+            }
+        }
     }
 
     private func applyChrome() {

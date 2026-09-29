@@ -66,6 +66,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = self.window ?? makeWindow()
         self.window = window
         window.makeKeyAndOrderFront(nil)
+        window.title = "AudioPeek Settings"
+        window.orderFrontRegardless()
     }
 
     @discardableResult

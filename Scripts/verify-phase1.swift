@@ -152,7 +152,7 @@ func settingsWindowID() -> CGWindowID? {
     for window in info {
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let title = window[kCGWindowName as String] as? String ?? ""
-        if owner == "AudioPeek" && title == "AudioPeek Settings" {
+        if owner == "AudioPeek" && (title.isEmpty || title == "AudioPeek Settings") {
             return window[kCGWindowNumber as String] as? CGWindowID
         }
     }
@@ -225,6 +225,34 @@ func assertLoginFailure(_ state: JSONValue, code: Int, label: String) {
     Check.expect(message.contains("Login Items"), "\(label) message mentions Login Items")
     Check.expect(!message.contains("Registered"), "\(label) message does not say Registered")
     Check.expect(state["lastLoginErrorCode"]?.int == code, "\(label) error code \(code), got \(state["lastLoginErrorCode"]?.int ?? -1)")
+}
+
+func writeWav(to url: URL) {
+    var data = Data()
+    func append32(_ value: UInt32) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+    func append16(_ value: UInt16) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+    let frames = 4410
+    data.append(contentsOf: "RIFF".utf8)
+    append32(UInt32(36 + frames * 2))
+    data.append(contentsOf: "WAVE".utf8)
+    data.append(contentsOf: "fmt ".utf8)
+    append32(16)
+    append16(1)
+    append16(1)
+    append32(44100)
+    append32(44100 * 2)
+    append16(2)
+    append16(16)
+    data.append(contentsOf: "data".utf8)
+    append32(UInt32(frames * 2))
+    data.append(Data(count: frames * 2))
+    try! data.write(to: url)
 }
 
 func snapshot(stateURL: URL, generation: Int, path: String) -> JSONValue? {
@@ -333,6 +361,59 @@ if let shot = snapshot(stateURL: fresh.stateURL, generation: state["generation"]
     state = shot
 }
 Check.expect(FileManager.default.fileExists(atPath: settingsPNG), "settings window snapshot")
+
+let openRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase1-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: openRoot, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: openRoot) }
+let wav = openRoot.appendingPathComponent("tone.wav")
+let other = openRoot.appendingPathComponent("other.wav")
+writeWav(to: wav)
+writeWav(to: other)
+
+let generationBeforeOpen = state["generation"]?.int ?? 0
+post("open", extra: ["paths": [wav.path]])
+guard let opened = waitForState(at: fresh.stateURL, above: generationBeforeOpen) else {
+    Check.expect(false, "one local wav state")
+    print("PHASE1 FAIL")
+    stopRunningApps()
+    exit(1)
+}
+state = opened
+Check.expect(state["slipVisible"]?.bool == true, "one local wav opens the panel")
+Check.expect(state["slipFilename"]?.string == "tone.wav", "one local wav shows the filename")
+
+let generationBeforePanelHide = state["generation"]?.int ?? 0
+post("pressViewerHotkey")
+let hideDeadline = Date().addingTimeInterval(2)
+var panelHidden: JSONValue?
+while Date() < hideDeadline {
+    if let candidate = readState(at: fresh.stateURL),
+       (candidate["generation"]?.int ?? 0) > generationBeforePanelHide,
+       candidate["slipVisible"]?.bool == false {
+        panelHidden = candidate
+        break
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+}
+guard let panelHidden else {
+    Check.expect(false, "panel hide state")
+    print("PHASE1 FAIL")
+    stopRunningApps()
+    exit(1)
+}
+state = panelHidden
+Check.expect(state["slipVisible"]?.bool == false, "panel is closed before two URLs")
+
+let generationBeforeTwo = state["generation"]?.int ?? 0
+post("open", extra: ["paths": [wav.path, other.path]])
+guard let two = waitForState(at: fresh.stateURL, above: generationBeforeTwo) else {
+    Check.expect(false, "two URL state")
+    print("PHASE1 FAIL")
+    stopRunningApps()
+    exit(1)
+}
+state = two
+Check.expect(state["slipVisible"]?.bool == false, "two URLs leave the panel closed")
 
 let generationBeforeDock = state["generation"]?.int ?? 0
 post("setDockIcon", extra: ["dock": true])

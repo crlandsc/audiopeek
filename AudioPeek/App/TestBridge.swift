@@ -257,6 +257,9 @@ final class TestBridge: NSObject {
         switch command {
         case "dump":
             break
+        case "open":
+            let paths = strings("paths", in: userInfo)
+            app.application(NSApp, open: paths.map { URL(fileURLWithPath: $0) })
         case "openSettings":
             onOpenSettings()
         case "snapshot":
