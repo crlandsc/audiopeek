@@ -533,10 +533,12 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         XCTAssertGreaterThan(corner.redComponent, 0.9)
 
         let glyphs = NSRect(origin: origin, size: AxisLabelChrome.glyphSize(of: "22.1k"))
-        let allowance = AxisLabelChrome.fadePadding + 4
         var painted = 0
         var outside = 0
-        var far = 0
+        var minX = width
+        var minY = height
+        var maxX = 0
+        var maxY = 0
         for y in 0..<height {
             for x in 0..<width {
                 guard let color = sample(x, y) else { continue }
@@ -546,17 +548,17 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
                 if CGFloat(y) < clip.minY - 1 || CGFloat(x) < clip.minX - 1 || CGFloat(y) > clip.maxY + 1 {
                     outside += 1
                 }
-                let nearGlyph = CGFloat(x) >= glyphs.minX - allowance && CGFloat(x) <= glyphs.maxX + allowance
-                    && CGFloat(y) >= glyphs.minY - allowance && CGFloat(y) <= glyphs.maxY + allowance
-                let nearTick = abs(CGFloat(x) - 8) <= allowance && CGFloat(y) <= 36
-                if !nearGlyph && !nearTick {
-                    far += 1
-                }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
             }
         }
         XCTAssertGreaterThan(painted, 8)
         XCTAssertEqual(outside, 0)
-        XCTAssertEqual(far, 0)
+        let bounds = NSRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        XCTAssertLessThanOrEqual(bounds.width, glyphs.width + AxisLabelChrome.fadePadding * 2 + 8)
+        XCTAssertLessThanOrEqual(bounds.height, glyphs.height + AxisLabelChrome.fadePadding * 2 + 8)
     }
 
     func testPlayheadTimeTextUpdatesWhenPositionChanges() throws {
