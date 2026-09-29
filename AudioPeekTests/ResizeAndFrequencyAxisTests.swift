@@ -113,7 +113,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         slip.openFiles([url])
         let deadline = Date().addingTimeInterval(3)
         while Date() < deadline, !(slip.playbackRunning && slip.overviewStartCount >= 1 && slip.panelsMade == 1) {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            CFRunLoopRunInMode(.defaultMode, 0.05, false)
         }
         XCTAssertTrue(slip.playbackRunning)
         XCTAssertEqual(slip.panelsMade, 1)
@@ -147,7 +147,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         slip.endResizeInteraction()
         XCTAssertFalse(slip.panesAreStretching)
         XCTAssertFalse(slip.panesHoldStretchSnapshot)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        CFRunLoopRunInMode(.defaultMode, 0.35, false)
         XCTAssertEqual(slip.overviewStartCount, starts + 1)
         XCTAssertEqual(slip.playbackStartCount, plays)
         XCTAssertEqual(slip.panelsMade, 1)
@@ -163,7 +163,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
             height: heightFrame.height + 70
         ))
         slip.endResizeInteraction()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        CFRunLoopRunInMode(.defaultMode, 0.35, false)
         XCTAssertEqual(slip.overviewStartCount, afterWidth)
         XCTAssertEqual(slip.playbackStartCount, plays)
         XCTAssertEqual(slip.panelsMade, 1)
@@ -173,7 +173,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         slip.resizePanelForTest(NSRect(x: again.origin.x, y: again.origin.y, width: again.width - 120, height: again.height))
         slip.resizePanelForTest(NSRect(x: again.origin.x, y: again.origin.y, width: again.width + 80, height: again.height))
         slip.endResizeInteraction()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        CFRunLoopRunInMode(.defaultMode, 0.35, false)
         XCTAssertEqual(slip.overviewStartCount, afterWidth + 1)
         XCTAssertEqual(slip.playbackStartCount, plays)
         XCTAssertEqual(slip.panelsMade, 1)
@@ -413,7 +413,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         playback.toggle()
         let started = Date()
         while playback.position < 0.3, Date().timeIntervalSince(started) < 2 {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            CFRunLoopRunInMode(.defaultMode, 0.05, false)
             playback.refreshPosition()
         }
         XCTAssertTrue(playback.isPlaying)
@@ -453,7 +453,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         var previous = seekAt
         let after = Date()
         while Date().timeIntervalSince(after) < 0.35 {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            CFRunLoopRunInMode(.defaultMode, 0.05, false)
             playback.refreshPosition()
             XCTAssertGreaterThan(playback.position, previous - 0.08, playback.clockDescription)
             XCTAssertLessThan(playback.position, previous + 0.4, playback.clockDescription)
