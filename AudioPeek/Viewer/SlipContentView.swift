@@ -826,9 +826,9 @@ final class SlipContentView: NSView {
             endHoverCursor()
             return
         }
-        // Finder owns mouse-moved events while it is front, so a tracking area
-        // never hears the pointer. Poll the screen location instead. The panel
-        // stays non-key, and the cursor is set only while the pointer is inside.
+        // Cursor changes only while AudioPeek is already active. Activating
+        // the app to force a cursor makes Finder flicker, so this poll does
+        // not take focus.
         let timer = Timer(timeInterval: hoverPollInterval, repeats: true) { [weak self] _ in
             self?.sampleHoverCursor()
         }
