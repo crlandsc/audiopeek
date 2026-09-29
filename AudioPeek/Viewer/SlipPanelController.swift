@@ -623,13 +623,13 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func evaluateGate() {
+    private func evaluateGate(pauseIfPlaying: Bool? = nil) {
         if isResizeDrag { return }
         let sample = gate.sample()
         lastLoad = sample
         let allows = gate.allowsPlayback(sample)
         overview.setWorkAllowed(allows)
-        let pausePlayback = !overview.isActive
+        let pausePlayback = pauseIfPlaying ?? !overview.isActive
         playback.applyGate(allows: allows && isVisible, pauseIfPlaying: pausePlayback)
         syncPlayhead()
     }
@@ -853,7 +853,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             content.redisplayPicture()
         }
         scheduleFrameSave()
-        evaluateGate()
+        evaluateGate(pauseIfPlaying: needsPass ? false : nil)
     }
 
     func sampleGateForTest() {
