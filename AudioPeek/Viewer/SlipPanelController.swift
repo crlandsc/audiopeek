@@ -406,6 +406,13 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    func openFiles(_ urls: [URL]) {
+        guard case .open(let url) = SelectionDecisionMaker.decide(urls) else {
+            return
+        }
+        show(url)
+    }
+
     private func show(_ url: URL) {
         let window = panel ?? makePanel()
         panel = window

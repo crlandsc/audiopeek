@@ -44,6 +44,17 @@ final class SelectionDecisionTests: XCTestCase {
         }
     }
 
+    func testAppBundleDocumentTypesListSupportedExtensions() throws {
+        let bundle = try XCTUnwrap(hostAppBundle(), "AudioPeek.app was not the test host")
+        let types = try XCTUnwrap(bundle.infoDictionary?["CFBundleDocumentTypes"] as? [[String: Any]])
+        var extensions = Set<String>()
+        for type in types {
+            let listed = type["CFBundleTypeExtensions"] as? [String] ?? []
+            extensions.formUnion(listed.map { $0.lowercased() })
+        }
+        XCTAssertEqual(extensions, AudioFileKind.extensions)
+    }
+
     func testRealFileOnDisk() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-selection-\(UUID().uuidString).wav")
         try Data([0]).write(to: url)
@@ -54,6 +65,20 @@ final class SelectionDecisionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: text) }
         XCTAssertEqual(SelectionDecisionMaker.decide([text]), .dismiss)
         XCTAssertEqual(SelectionDecisionMaker.decide([url, text]), .dismiss)
+    }
+
+    private func hostAppBundle() -> Bundle? {
+        if Bundle.main.bundleIdentifier == "com.landschoot.audiopeek" {
+            return Bundle.main
+        }
+        let appURL = Bundle(for: SelectionDecisionTests.self).bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        guard let bundle = Bundle(url: appURL), bundle.bundleIdentifier == "com.landschoot.audiopeek" else {
+            return nil
+        }
+        return bundle
     }
 
     private func localFile(_ url: URL) -> SelectionFacts {

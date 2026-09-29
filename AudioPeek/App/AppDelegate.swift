@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController!
     private var hotkeyCenter: HotkeyCenter!
     private var slip: SlipPanelController!
+    private var pendingOpens: [[URL]] = []
     private var scriptedFinder: ScriptedFinderSelection?
     private var registeredCombo: HotkeyCombo?
     private(set) var hotkeyFactoryFellBack = false
@@ -64,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSettings()
             }
         )
+        deliverPendingOpens()
         hotkeyCenter.onViewer = { [weak self] in
             self?.slip.viewerHotkey()
         }
@@ -144,6 +146,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let registeredCombo, registeredCombo != desired else { return }
         if hotkeyCenter.registerViewer(registeredCombo) == noErr, store.blob.hotkey != registeredCombo {
             store.setHotkey(registeredCombo)
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // A cold launch can deliver the open before slip exists.
+        pendingOpens.append(urls)
+        deliverPendingOpens()
+    }
+
+    private func deliverPendingOpens() {
+        guard let slip else { return }
+        while !pendingOpens.isEmpty {
+            let urls = pendingOpens.removeFirst()
+            slip.openFiles(urls)
         }
     }
 
