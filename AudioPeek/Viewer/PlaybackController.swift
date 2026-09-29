@@ -23,6 +23,7 @@ final class PlaybackController {
     private var renderQueued = false
     private var scrubbing = false
     private var playAfterScrub = false
+    private(set) var engineStopCount = 0
     private var clockAnchorSample: AVAudioFramePosition?
     private var clockAnchorUptime: TimeInterval?
     private(set) var isPlaying = false
@@ -104,15 +105,16 @@ final class PlaybackController {
         }
     }
 
+    var isScrubbing: Bool { scrubbing }
+
     func beginScrub(toFraction fraction: Double) {
         guard duration > 0 else { return }
         playAfterScrub = isPlaying
         scrubbing = true
-        if isPlaying {
-            userPaused = true
-            pauseEngine()
-        }
         placeScrub(fraction)
+        if playAfterScrub {
+            silenceWithoutStoppingEngine()
+        }
     }
 
     func moveScrub(toFraction fraction: Double) {
@@ -153,6 +155,7 @@ final class PlaybackController {
         }
         if engine.isRunning {
             engine.stop()
+            engineStopCount += 1
         }
         playGeneration += 1
         renderQueued = false
@@ -238,6 +241,8 @@ final class PlaybackController {
             return
         }
         // pause() keeps the old segment queued. Stop clears it so play starts at this position.
+        // Leave the engine running when it already is. Stopping it here makes the next
+        // play wait on a cold start, and the playhead jumps as if it is buffering.
         node.stop()
         renderQueued = false
         clearClockAnchor()
@@ -291,6 +296,18 @@ final class PlaybackController {
         clockAnchorUptime = nil
     }
 
+    private func silenceWithoutStoppingEngine() {
+        renderQueued = false
+        playGeneration += 1
+        clearClockAnchor()
+        if node.isPlaying {
+            node.pause()
+        }
+        isPlaying = false
+        userPaused = true
+        onChange()
+    }
+
     private func pauseEngine() {
         renderQueued = false
         refreshPosition()
@@ -301,6 +318,7 @@ final class PlaybackController {
         isPlaying = false
         if engine.isRunning {
             engine.stop()
+            engineStopCount += 1
         }
         onChange()
     }

@@ -141,7 +141,9 @@ struct SettingsView: View {
                         }
                         Toggle("Frequency axis", isOn: store.binding(\.showFrequencyAxis))
                             .accessibilityIdentifier("spectrogram.frequencyAxis")
-                        Text("Frequencies along the left of the spectrogram, from 20 Hz up to Nyquist.")
+                        Toggle("Time axis", isOn: store.binding(\.showTimeAxis))
+                            .accessibilityIdentifier("preview.timeAxis")
+                        Text("Frequencies along the left of the spectrogram, from 20 up to Nyquist. Time runs along the bottom of the preview. Both start off.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Picker("Colors", selection: store.binding(\.spectrogram.colorMap)) {

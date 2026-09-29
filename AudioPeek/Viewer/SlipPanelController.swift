@@ -11,6 +11,9 @@ final class SlipWindow: NSPanel {
     // panel, so one drag shows two windows. Handle the edge here and do not
     // let that session start.
     override func sendEvent(_ event: NSEvent) {
+        if !acceptsMouseMovedEvents {
+            acceptsMouseMovedEvents = true
+        }
         if event.type == .leftMouseDown,
            let content = contentView as? SlipContentView,
            !content.isResizeDrag {
@@ -21,6 +24,12 @@ final class SlipWindow: NSPanel {
             }
         }
         super.sendEvent(event)
+        if event.type == .mouseExited {
+            NSCursor.arrow.set()
+        } else if event.type == .mouseMoved || event.type == .mouseEntered || event.type == .cursorUpdate,
+                  let content = contentView as? SlipContentView {
+            content.updateHoverCursor(with: event)
+        }
     }
 }
 
@@ -87,6 +96,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
                 self.playback.moveScrub(toFraction: fraction)
             case .ended:
                 self.playback.endScrub(toFraction: fraction)
+                if self.playback.isPlaying {
+                    self.ensurePlayheadTimer()
+                }
             }
             self.syncPlayhead()
         }
@@ -205,6 +217,27 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     var playbackStartCount: Int { playback.playStartCount }
 
     var frequencyTickLabels: [String] { content.spectrogramPane.frequencyTickLabels }
+
+    var timeTickLabels: [String] {
+        if content.spectrogramPane.showsTimeAxis {
+            return content.spectrogramPane.timeTickLabels
+        }
+        return content.waveformPane.timeTickLabels
+    }
+
+    var splitFraction: Double { content.splitFraction }
+
+    var panesAreStretching: Bool {
+        content.waveformPane.isStretching && content.spectrogramPane.isStretching
+    }
+
+    var panesHoldStretchSnapshot: Bool {
+        content.waveformPane.hasStretchSnapshot && content.spectrogramPane.hasStretchSnapshot
+    }
+
+    func applySplitDragForTest(rawFraction: Double) {
+        content.applySplitDrag(rawFraction: rawFraction)
+    }
 
     var overviewFirstMaximum: Double {
         guard let column = overviewSnapshot.lanes.first?.first else { return 0 }
@@ -564,6 +597,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
         playback.install(read)
         refreshMetadata()
+        syncAxes()
         playback.setGain(store.effectiveVolume)
         onFileOpened()
         startGate()
@@ -589,13 +623,13 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func evaluateGate() {
+    private func evaluateGate(pauseIfPlaying: Bool? = nil) {
         if isResizeDrag { return }
         let sample = gate.sample()
         lastLoad = sample
         let allows = gate.allowsPlayback(sample)
         overview.setWorkAllowed(allows)
-        let pausePlayback = !overview.isActive
+        let pausePlayback = pauseIfPlaying ?? !overview.isActive
         playback.applyGate(allows: allows && isVisible, pauseIfPlaying: pausePlayback)
         syncPlayhead()
     }
@@ -638,7 +672,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func retirePlayheadTimerIfIdle() {
-        guard !playback.isPlaying, content.revealCaughtUp else { return }
+        guard !playback.isPlaying, !playback.isScrubbing, content.revealCaughtUp else { return }
         playheadTimer?.invalidate()
         playheadTimer = nil
     }
@@ -819,7 +853,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             content.redisplayPicture()
         }
         scheduleFrameSave()
-        evaluateGate()
+        evaluateGate(pauseIfPlaying: needsPass ? false : nil)
     }
 
     func sampleGateForTest() {
@@ -925,7 +959,12 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func syncFrequencyAxis() {
+        syncAxes()
+    }
+
+    private func syncAxes() {
         content.setFrequencyAxis(shown: store.blob.showFrequencyAxis, sampleRate: playback.info?.sampleRate ?? 0)
+        content.setTimeAxis(shown: store.blob.showTimeAxis, duration: playback.duration)
     }
 
     private var currentEstimate: Double {

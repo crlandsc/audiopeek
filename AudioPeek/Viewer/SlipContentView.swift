@@ -199,14 +199,16 @@ enum FrequencyAxisTicks {
     }
 
     static func format(_ hertz: Double) -> String {
-        if hertz >= 1000 {
-            let kilo = hertz / 1000
-            if abs(kilo - kilo.rounded()) < 0.049 {
-                return "\(Int(kilo.rounded())) kHz"
+        let rounded = hertz.rounded()
+        if rounded >= 1000 {
+            let kilo = rounded / 1000
+            let whole = kilo.rounded()
+            if abs(kilo - whole) < 0.05 {
+                return "\(Int(whole))k"
             }
-            return String(format: "%.1f kHz", kilo)
+            return String(format: "%.1fk", kilo)
         }
-        return "\(Int(hertz.rounded())) Hz"
+        return "\(Int(rounded))"
     }
 
     private static func niceStep(_ raw: Double) -> Double {
@@ -291,6 +293,162 @@ enum FrequencyAxisTicks {
             return false
         }
         return true
+    }
+}
+
+enum TimeAxisTicks {
+    static let labelFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+    static let minGap: CGFloat = 8
+
+    struct Tick: Equatable {
+        var seconds: Double
+        var centerX: CGFloat
+        var label: String
+    }
+
+    static func step(duration: Double, width: CGFloat) -> Double {
+        guard duration > 0, width > 0 else { return 1 }
+        let slots = max(1, width / 32)
+        var raw = duration / Double(slots)
+        if duration >= 3600 {
+            raw = max(raw, 10)
+        } else if duration >= 600 {
+            raw = max(raw, 1)
+        }
+        return niceStep(max(raw, 0.001))
+    }
+
+    static func layout(width: CGFloat, duration: Double) -> [Tick] {
+        guard width > 1, duration > 0 else { return [] }
+        let chosen = step(duration: duration, width: width)
+        let count = max(0, Int((duration / chosen).rounded(.down)))
+        var ticks: [Tick] = []
+        ticks.reserveCapacity(count + 1)
+        for index in 0...count {
+            let seconds = min(duration, Double(index) * chosen)
+            let x = CGFloat(seconds / duration) * width
+            ticks.append(Tick(seconds: seconds, centerX: x, label: format(seconds, step: chosen)))
+        }
+        return droppingOverlaps(ticks, width: width)
+    }
+
+    static func format(_ seconds: Double, step: Double) -> String {
+        let clamped = max(0, seconds)
+        if step < 1, clamped < 60 {
+            if abs(clamped - clamped.rounded()) < 0.001 {
+                return String(format: "%.0f", clamped)
+            }
+            return String(format: "%g", clamped)
+        }
+        let whole = Int((clamped + 0.001).rounded(.down))
+        if whole >= 3600 || step >= 3600 {
+            return String(format: "%d:%02d:%02d", whole / 3600, (whole % 3600) / 60, whole % 60)
+        }
+        if whole >= 60 || step >= 60 {
+            return String(format: "%d:%02d", whole / 60, whole % 60)
+        }
+        return "\(whole)"
+    }
+
+    private static let steps: [Double] = [
+        0.001, 0.002, 0.005,
+        0.01, 0.02, 0.05,
+        0.1, 0.2, 0.5,
+        1, 2, 5, 10, 15, 30,
+        60, 120, 300, 600, 900, 1800,
+        3600, 7200, 14400, 21600, 43200, 86400
+    ]
+
+    private static func niceStep(_ raw: Double) -> Double {
+        for candidate in steps where candidate + 1e-9 >= raw {
+            return candidate
+        }
+        var candidate = steps[steps.count - 1]
+        while candidate < raw {
+            candidate *= 2
+        }
+        return candidate
+    }
+
+    private static func droppingOverlaps(_ ticks: [Tick], width: CGFloat) -> [Tick] {
+        var lastRight = -CGFloat.greatestFiniteMagnitude
+        return ticks.map { tick in
+            let textWidth = ceil((tick.label as NSString).size(withAttributes: [.font: labelFont]).width)
+            let left = tick.centerX - textWidth / 2
+            let right = left + textWidth
+            let fits = left >= 1 && right <= width - 1 && left >= lastRight + minGap
+            if fits {
+                lastRight = right
+                return tick
+            }
+            return Tick(seconds: tick.seconds, centerX: tick.centerX, label: "")
+        }
+    }
+}
+
+enum AxisLabelChrome {
+    static let font = NSFont.systemFont(ofSize: 10, weight: .medium)
+    static let tickLength: CGFloat = 6
+    static let fadeAlphas: [CGFloat] = [0.6, 0.24, 0]
+
+    static func size(of label: String) -> NSSize {
+        let raw = (label as NSString).size(withAttributes: [.font: font])
+        return NSSize(width: ceil(raw.width) + 6, height: ceil(raw.height) + 2)
+    }
+
+    static func drawTick(from start: NSPoint, to end: NSPoint) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.setShadow(offset: .zero, blur: 1.2, color: NSColor.black.withAlphaComponent(0.8).cgColor)
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.95).cgColor)
+        ctx.setLineWidth(1)
+        ctx.setLineCap(.butt)
+        ctx.move(to: start)
+        ctx.addLine(to: end)
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    static func drawLabel(_ label: String, textOrigin: NSPoint, in view: NSView) {
+        let textRect = NSRect(origin: textOrigin, size: size(of: label))
+        drawFade(around: textRect)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .shadow: {
+                let shadow = NSShadow()
+                shadow.shadowOffset = .zero
+                shadow.shadowBlurRadius = 2.5
+                shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
+                return shadow
+            }()
+        ]
+        (label as NSString).draw(at: textOrigin, withAttributes: attributes)
+    }
+
+    private static func drawFade(around textRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let center = CGPoint(x: textRect.midX, y: textRect.midY)
+        let radius = max(textRect.width, textRect.height) * 0.95 + 10
+        let colors = fadeAlphas.map { NSColor.black.withAlphaComponent($0).cgColor } as CFArray
+        let locations: [CGFloat] = [0, 0.42, 1]
+        guard let gradient = locations.withUnsafeBufferPointer({ buffer in
+            CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: colors,
+                locations: buffer.baseAddress
+            )
+        }) else { return }
+        ctx.saveGState()
+        ctx.drawRadialGradient(
+            gradient,
+            startCenter: center,
+            startRadius: 1,
+            endCenter: center,
+            endRadius: radius,
+            options: []
+        )
+        ctx.restoreGState()
     }
 }
 
@@ -552,7 +710,7 @@ final class SlipContentView: NSView {
         // become key, so the tracking area sets the resize cursor itself.
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -575,26 +733,43 @@ final class SlipContentView: NSView {
         addCursorRect(NSRect(x: width - margin, y: 0, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
         addCursorRect(NSRect(x: 0, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
         addCursorRect(NSRect(x: width - margin, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upLeftCursor)
+        if !divider.isHidden, divider.frame.width > margin * 2, divider.frame.height > 0 {
+            let hit = divider.frame.insetBy(dx: margin, dy: -6)
+            if hit.width > 0, hit.height > 0 {
+                addCursorRect(hit, cursor: .resizeUpDown)
+            }
+        }
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        applyResizeCursor(convert(event.locationInWindow, from: nil))
+        updateHoverCursor(with: event)
     }
 
     override func mouseMoved(with event: NSEvent) {
-        applyResizeCursor(convert(event.locationInWindow, from: nil))
+        updateHoverCursor(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     func resizeCursor(at point: NSPoint) -> NSCursor? {
-        SlipResize.edges(at: point, in: bounds).axis?.cursor
+        if let cursor = SlipResize.edges(at: point, in: bounds).axis?.cursor {
+            return cursor
+        }
+        if splitHit(point) {
+            return .resizeUpDown
+        }
+        return nil
     }
 
-    private func applyResizeCursor(_ point: NSPoint) {
-        if let cursor = resizeCursor(at: point) {
-            cursor.set()
-        } else {
+    func updateHoverCursor(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point), let cursor = resizeCursor(at: point) else {
             NSCursor.arrow.set()
+            return
         }
+        cursor.set()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -653,9 +828,12 @@ final class SlipContentView: NSView {
 
     func beginResizeStretch() {
         guard !isResizeDrag else { return }
+        layoutSubtreeIfNeeded()
         isResizeDrag = true
         waveformPane.beginStretch()
         spectrogramPane.beginStretch()
+        waveformPlayhead.isHidden = true
+        spectrogramPlayhead.isHidden = true
     }
 
     func endResizeStretch() {
@@ -663,6 +841,9 @@ final class SlipContentView: NSView {
         isResizeDrag = false
         waveformPane.endStretch()
         spectrogramPane.endStretch()
+        waveformPlayhead.isHidden = false
+        spectrogramPlayhead.isHidden = false
+        needsLayout = true
     }
 
     func redisplayPicture() {
@@ -707,15 +888,19 @@ final class SlipContentView: NSView {
         }
     }
 
+    func applySplitDrag(rawFraction: Double) {
+        let clamped = min(max(rawFraction, 0.08), 0.92)
+        let fraction = SplitSnap.value(clamped)
+        splitFraction = fraction
+        onSplit(fraction)
+        needsLayout = true
+    }
+
     private func updateSplit(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         let top: CGFloat = 35
         let body = max(1, bounds.height - top)
-        let raw = min(max((local.y - top) / body, 0.08), 0.92)
-        let fraction = SplitSnap.value(raw)
-        splitFraction = fraction
-        onSplit(fraction)
-        needsLayout = true
+        applySplitDrag(rawFraction: (local.y - top) / body)
     }
 
     private func splitHit(_ point: NSPoint) -> Bool {
@@ -815,6 +1000,13 @@ final class SlipContentView: NSView {
         spectrogramPane.setFrequencyAxis(shown: shown, sampleRate: sampleRate)
     }
 
+    func setTimeAxis(shown: Bool, duration: Double) {
+        let onWaveform = shown && showWaveform && !showSpectrogram
+        let onSpectrogram = shown && showSpectrogram
+        waveformPane.setTimeAxis(shown: onWaveform, duration: duration)
+        spectrogramPane.setTimeAxis(shown: onSpectrogram, duration: duration)
+    }
+
 }
 
 enum ScrubPhase {
@@ -841,7 +1033,15 @@ final class SlipPaneView: NSView {
     var revealTarget: CGFloat { targetColumns }
     private(set) var showsFrequencyAxis = false
     private var frequencyNyquist = 0.0
-    private var stretching = false
+    private(set) var showsTimeAxis = false
+    private var timeDuration = 0.0
+    private(set) var isStretching = false
+    private var stretchSnapshot: NSBitmapImageRep?
+    private(set) var drawCount = 0
+
+    var hasStretchSnapshot: Bool { stretchSnapshot != nil }
+
+    override var wantsUpdateLayer: Bool { isStretching }
 
     override var isFlipped: Bool { true }
 
@@ -851,7 +1051,9 @@ final class SlipPaneView: NSView {
         self.amplitude = amplitude
         waveformColor = color
         setRevealTarget(snapshot.lanes.map(\.count).max() ?? 0)
-        needsDisplay = true
+        if !isStretching {
+            needsDisplay = true
+        }
     }
 
     func clearWaveform() {
@@ -859,7 +1061,9 @@ final class SlipPaneView: NSView {
         columnCount = 0
         revealedColumns = 0
         targetColumns = 0
-        needsDisplay = true
+        if !isStretching {
+            needsDisplay = true
+        }
     }
 
     func setSpectrogram(
@@ -896,7 +1100,9 @@ final class SlipPaneView: NSView {
                 guard self.isCurrentSpectrogramBuild(build) else { return }
                 self.spectrogramImages = images
                 self.setRevealTarget(images.first?.width ?? 0)
-                self.needsDisplay = true
+                if !self.isStretching {
+                    self.needsDisplay = true
+                }
             }
         }
     }
@@ -907,7 +1113,9 @@ final class SlipPaneView: NSView {
         _ = nextSpectrogramBuild()
         revealedColumns = 0
         targetColumns = 0
-        needsDisplay = true
+        if !isStretching {
+            needsDisplay = true
+        }
     }
 
     func setFrequencyAxis(shown: Bool, sampleRate: Double) {
@@ -915,7 +1123,16 @@ final class SlipPaneView: NSView {
         let changed = shown != showsFrequencyAxis || nyquist != frequencyNyquist
         showsFrequencyAxis = shown
         frequencyNyquist = nyquist
-        if changed, !stretching {
+        if changed, !isStretching {
+            needsDisplay = true
+        }
+    }
+
+    func setTimeAxis(shown: Bool, duration: Double) {
+        let changed = shown != showsTimeAxis || abs(duration - timeDuration) > 0.0001
+        showsTimeAxis = shown
+        timeDuration = duration
+        if changed, !isStretching {
             needsDisplay = true
         }
     }
@@ -925,17 +1142,63 @@ final class SlipPaneView: NSView {
         return FrequencyAxisTicks.layout(height: bounds.height, nyquist: frequencyNyquist).map(\.label)
     }
 
+    var timeTickLabels: [String] {
+        guard showsTimeAxis else { return [] }
+        return TimeAxisTicks.layout(width: bounds.width, duration: timeDuration).compactMap { tick in
+            tick.label.isEmpty ? nil : tick.label
+        }
+    }
+
     func beginStretch() {
+        guard !isStretching else { return }
         wantsLayer = true
-        stretching = true
+        let snapshot = captureSnapshot()
+        isStretching = true
+        stretchSnapshot = snapshot
         layerContentsRedrawPolicy = .never
         layer?.contentsGravity = .resize
+        layer?.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        layer?.contents = snapshot?.cgImage
     }
 
     func endStretch() {
-        stretching = false
+        guard isStretching else { return }
+        isStretching = false
+        stretchSnapshot = nil
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        layer?.contents = nil
+        needsDisplay = true
+    }
+
+    override func updateLayer() {
+        guard isStretching else { return }
         layer?.contentsGravity = .resize
+        layer?.contents = stretchSnapshot?.cgImage
+    }
+
+    private func captureSnapshot() -> NSBitmapImageRep? {
+        let rect = bounds
+        guard rect.width > 1, rect.height > 1 else { return nil }
+        if let rep = bitmapImageRepForCachingDisplay(in: rect) {
+            cacheDisplay(in: rect, to: rep)
+            return rep
+        }
+        let pixelsWide = max(1, Int(rect.width.rounded(.up)))
+        let pixelsHigh = max(1, Int(rect.height.rounded(.up)))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelsWide,
+            pixelsHigh: pixelsHigh,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        cacheDisplay(in: rect, to: rep)
+        return rep
     }
 
     private func nextSpectrogramBuild() -> Int {
@@ -954,7 +1217,7 @@ final class SlipPaneView: NSView {
     }
 
     func advanceReveal() {
-        if stretching { return }
+        if isStretching { return }
         let gap = targetColumns - revealedColumns
         if revealCaughtUp {
             guard revealedColumns != targetColumns else { return }
@@ -990,11 +1253,18 @@ final class SlipPaneView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if isStretching { return }
+        drawCount += 1
         if !spectrogramImages.isEmpty {
             drawSpectrogram()
             drawFrequencyAxis()
-            return
+        } else {
+            drawWaveform()
         }
+        drawTimeAxis()
+    }
+
+    private func drawWaveform() {
         guard columnCount > 0, let lane = lanes.first, !lane.isEmpty else { return }
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
@@ -1079,54 +1349,44 @@ final class SlipPaneView: NSView {
     private func drawFrequencyLabels(in lane: CGRect) {
         let ticks = FrequencyAxisTicks.layout(height: lane.height, nyquist: frequencyNyquist)
         guard !ticks.isEmpty else { return }
-        let axis = NSBezierPath()
-        axis.move(to: NSPoint(x: lane.minX + 3, y: lane.minY + 4))
-        axis.line(to: NSPoint(x: lane.minX + 3, y: lane.maxY - 4))
-        axis.lineWidth = 1
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.8)
-        shadow.shadowOffset = .zero
-        shadow.shadowBlurRadius = 1.5
-        shadow.set()
-        NSColor.white.withAlphaComponent(0.72).setStroke()
-        axis.stroke()
-        shadow.shadowBlurRadius = 0
-        shadow.set()
-        let font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        let textColor = NSColor.white.withAlphaComponent(0.96)
-        let backing = NSColor.black.withAlphaComponent(0.5)
+        let timeBand: CGFloat = showsTimeAxis && timeDuration > 0 ? 22 : 0
         for tick in ticks {
-            let text = tick.label as NSString
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: textColor
-            ]
-            let size = text.size(withAttributes: attributes)
-            let rect = NSRect(
-                x: lane.minX + 7,
-                y: lane.minY + tick.centerY - size.height / 2 - 1,
-                width: size.width + 8,
-                height: size.height + 2
+            let center = lane.minY + tick.centerY
+            if timeBand > 0, center > lane.maxY - timeBand {
+                continue
+            }
+            let labelSize = AxisLabelChrome.size(of: tick.label)
+            let textOrigin = NSPoint(
+                x: lane.minX + 4 + AxisLabelChrome.tickLength + 3,
+                y: center - labelSize.height / 2
             )
-            let chip = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-            let chipShadow = NSShadow()
-            chipShadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
-            chipShadow.shadowOffset = .zero
-            chipShadow.shadowBlurRadius = 2
-            chipShadow.set()
-            backing.setFill()
-            chip.fill()
-            chipShadow.shadowBlurRadius = 0
-            chipShadow.set()
-            let cell = NSTextFieldCell(textCell: tick.label)
-            cell.font = font
-            cell.textColor = textColor
-            cell.drawsBackground = false
-            cell.isBordered = false
-            cell.alignment = .left
-            cell.draw(
-                withFrame: NSRect(x: rect.minX + 4, y: rect.minY + 1, width: size.width, height: size.height),
-                in: self
+            AxisLabelChrome.drawLabel(tick.label, textOrigin: textOrigin, in: self)
+            AxisLabelChrome.drawTick(
+                from: NSPoint(x: lane.minX + 2, y: center),
+                to: NSPoint(x: lane.minX + 2 + AxisLabelChrome.tickLength, y: center)
+            )
+        }
+    }
+
+    private func drawTimeAxis() {
+        guard showsTimeAxis, timeDuration > 0 else { return }
+        let ticks = TimeAxisTicks.layout(width: bounds.width, duration: timeDuration)
+        guard !ticks.isEmpty else { return }
+        let baseline = bounds.maxY - 2
+        for tick in ticks {
+            let tickTop = baseline - AxisLabelChrome.tickLength
+            if !tick.label.isEmpty {
+                let labelSize = AxisLabelChrome.size(of: tick.label)
+                var x = tick.centerX - labelSize.width / 2
+                x = min(max(1, x), max(1, bounds.width - labelSize.width - 1))
+                let y = tickTop - labelSize.height - 1
+                if y >= 0 {
+                    AxisLabelChrome.drawLabel(tick.label, textOrigin: NSPoint(x: x, y: y), in: self)
+                }
+            }
+            AxisLabelChrome.drawTick(
+                from: NSPoint(x: tick.centerX, y: tickTop),
+                to: NSPoint(x: tick.centerX, y: baseline)
             )
         }
     }
