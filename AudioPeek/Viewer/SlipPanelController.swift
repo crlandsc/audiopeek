@@ -35,6 +35,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var currentURL: URL?
     private var openGeneration = 0
     private var forcedPanelUp: Bool?
+    private var orderedOut = false
     private var appliedPreviewSpace = false
     private var injectedFrontBundleID: String?
     private(set) var requestCount = 0
@@ -115,7 +116,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
-    var isVisible: Bool { forcedPanelUp ?? (panel?.isVisible ?? false) }
+    var isVisible: Bool {
+        if let forcedPanelUp { return forcedPanelUp }
+        if orderedOut { return false }
+        return panel?.isVisible ?? false
+    }
 
     var pollScheduled: Bool { pollTimer?.isValid == true }
 
@@ -298,6 +303,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        orderedOut = true
         openGeneration += 1
         epoch += 1
         inFlight = false
@@ -414,6 +420,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func show(_ url: URL) {
+        orderedOut = false
         let window = panel ?? makePanel()
         panel = window
         let changed = currentURL != url
