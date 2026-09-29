@@ -185,6 +185,7 @@ final class TestBridge: NSObject {
             finderPollScheduled: slip.pollScheduled,
             finderRequestCount: slip.requestCount,
             playbackRunning: slip.playbackRunning,
+            audioEngineRunning: slip.audioEngineRunning,
             escapeHotkeyRegistered: hotkey.escapeRegistered,
             previewSpaceRegistered: hotkey.previewSpaceRegistered,
             viewerHotkeyStatus: Int(hotkey.viewerStatus),
@@ -455,6 +456,7 @@ private struct TestState: Encodable {
     var finderPollScheduled: Bool
     var finderRequestCount: Int
     var playbackRunning: Bool
+    var audioEngineRunning: Bool
     var escapeHotkeyRegistered: Bool
     var previewSpaceRegistered: Bool
     var viewerHotkeyStatus: Int

@@ -14,7 +14,7 @@ struct ReadAudio {
 
 @MainActor
 final class PlaybackController {
-    private let engine = AVAudioEngine()
+    let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private var file: AVAudioFile?
     private var origin: TimeInterval = 0
@@ -292,10 +292,14 @@ final class PlaybackController {
     private func pauseEngine() {
         renderQueued = false
         refreshPosition()
+        playGeneration += 1
         if node.isPlaying {
             node.pause()
         }
         isPlaying = false
+        if engine.isRunning {
+            engine.stop()
+        }
         onChange()
     }
 }

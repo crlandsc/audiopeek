@@ -54,6 +54,7 @@ final class SlipContentView: NSView {
     var onScrub: (String, Double, ScrubPhase) -> Void = { _, _, _ in }
     var onResizeEnd: () -> Void = {}
     var onAppearance: () -> Void = {}
+    var onRevealTargetRaised: () -> Void = {}
     private var playheadFraction = 0.0
 
     var showWaveform = true
@@ -117,6 +118,12 @@ final class SlipContentView: NSView {
         }
         spectrogramPane.onScrub = { [weak self] fraction, phase in
             self?.onScrub("spectrogram", fraction, phase)
+        }
+        waveformPane.onRevealTargetRaised = { [weak self] in
+            self?.onRevealTargetRaised()
+        }
+        spectrogramPane.onRevealTargetRaised = { [weak self] in
+            self?.onRevealTargetRaised()
         }
         waveformPlayhead.setAccessibilityIdentifier("slip.playhead.waveform")
         spectrogramPlayhead.setAccessibilityIdentifier("slip.playhead.spectrogram")
@@ -414,6 +421,10 @@ final class SlipContentView: NSView {
         spectrogramPane.advanceReveal()
     }
 
+    var revealCaughtUp: Bool {
+        waveformPane.revealCaughtUp && spectrogramPane.revealCaughtUp
+    }
+
     func setWaveform(snapshot: WaveformSnapshot, amplitude: WaveformAmplitude, color: WaveformColor) {
         waveformPane.setWaveform(snapshot: snapshot, amplitude: amplitude, color: color)
     }
@@ -475,7 +486,9 @@ final class SlipPaneView: NSView {
     private var spectrogramBuild = 0
     private var revealedColumns: CGFloat = 0
     private var targetColumns: CGFloat = 0
+    var onRevealTargetRaised: () -> Void = {}
     var revealedColumnCount: CGFloat { revealedColumns }
+    var revealTarget: CGFloat { targetColumns }
 
     override var isFlipped: Bool { true }
 
@@ -561,7 +574,7 @@ final class SlipPaneView: NSView {
 
     func advanceReveal() {
         let gap = targetColumns - revealedColumns
-        if gap <= 0.35 {
+        if revealCaughtUp {
             guard revealedColumns != targetColumns else { return }
             revealedColumns = targetColumns
             needsDisplay = true
@@ -572,12 +585,21 @@ final class SlipPaneView: NSView {
         needsDisplay = true
     }
 
+    var revealCaughtUp: Bool {
+        targetColumns - revealedColumns <= 0.35
+    }
+
     private func setRevealTarget(_ count: Int) {
         let next = CGFloat(max(count, 0))
-        if next + 1 < targetColumns {
+        let raised = next > targetColumns
+        let rewound = next + 1 < targetColumns
+        if rewound {
             revealedColumns = 0
         }
         targetColumns = next
+        if raised || rewound {
+            onRevealTargetRaised()
+        }
     }
 
     private func revealClipWidth(total: Int) -> CGFloat {
