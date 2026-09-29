@@ -11,10 +11,10 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
             (NSPoint(x: 856, y: 250), .resizeLeftRight),
             (NSPoint(x: 430, y: 3), .resizeUpDown),
             (NSPoint(x: 430, y: 496), .resizeUpDown),
-            (NSPoint(x: 3, y: 3), .resizeUpLeftDownRight),
-            (NSPoint(x: 856, y: 496), .resizeUpLeftDownRight),
-            (NSPoint(x: 856, y: 3), .resizeUpRightDownLeft),
-            (NSPoint(x: 3, y: 496), .resizeUpRightDownLeft)
+            (NSPoint(x: 3, y: 3), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 856, y: 496), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 856, y: 3), SlipResizeAxis.upRightCursor),
+            (NSPoint(x: 3, y: 496), SlipResizeAxis.upRightCursor)
         ]
         for (point, cursor) in checks {
             XCTAssertTrue(view.resizeCursor(at: point) === cursor)

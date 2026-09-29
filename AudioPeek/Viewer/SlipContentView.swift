@@ -61,10 +61,37 @@ enum SlipResizeAxis: Equatable {
         case .vertical:
             return .resizeUpDown
         case .diagonalUpLeft:
-            return .resizeUpLeftDownRight
+            return Self.upLeftCursor
         case .diagonalUpRight:
-            return .resizeUpRightDownLeft
+            return Self.upRightCursor
         }
+    }
+
+    static let upLeftCursor = SlipSystemCursors.named(
+        "resizenorthwestsoutheast",
+        fallback: .resizeLeftRight
+    )
+    static let upRightCursor = SlipSystemCursors.named(
+        "resizenortheastsouthwest",
+        fallback: .resizeUpDown
+    )
+}
+
+enum SlipSystemCursors {
+    private static let root = URL(fileURLWithPath: "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/Resources/cursors")
+
+    static func named(_ folder: String, fallback: NSCursor) -> NSCursor {
+        let directory = root.appendingPathComponent(folder)
+        guard let image = NSImage(contentsOf: directory.appendingPathComponent("cursor.pdf")) else {
+            return fallback
+        }
+        var hot = NSPoint(x: image.size.width / 2, y: image.size.height / 2)
+        if let info = NSDictionary(contentsOf: directory.appendingPathComponent("info.plist")),
+           let x = info["hotx"] as? NSNumber,
+           let y = info["hoty"] as? NSNumber {
+            hot = NSPoint(x: x.doubleValue, y: y.doubleValue)
+        }
+        return NSCursor(image: image, hotSpot: hot)
     }
 }
 
@@ -544,10 +571,10 @@ final class SlipContentView: NSView {
         addCursorRect(NSRect(x: margin, y: height - margin, width: width - margin * 2, height: margin), cursor: .resizeUpDown)
         addCursorRect(NSRect(x: 0, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
         addCursorRect(NSRect(x: width - margin, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
-        addCursorRect(NSRect(x: 0, y: 0, width: margin, height: margin), cursor: .resizeUpLeftDownRight)
-        addCursorRect(NSRect(x: width - margin, y: 0, width: margin, height: margin), cursor: .resizeUpRightDownLeft)
-        addCursorRect(NSRect(x: 0, y: height - margin, width: margin, height: margin), cursor: .resizeUpRightDownLeft)
-        addCursorRect(NSRect(x: width - margin, y: height - margin, width: margin, height: margin), cursor: .resizeUpLeftDownRight)
+        addCursorRect(NSRect(x: 0, y: 0, width: margin, height: margin), cursor: SlipResizeAxis.upLeftCursor)
+        addCursorRect(NSRect(x: width - margin, y: 0, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
+        addCursorRect(NSRect(x: 0, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
+        addCursorRect(NSRect(x: width - margin, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upLeftCursor)
     }
 
     override func cursorUpdate(with event: NSEvent) {
