@@ -393,7 +393,7 @@ enum AxisLabelChrome {
 
     static func size(of label: String) -> NSSize {
         let raw = (label as NSString).size(withAttributes: [.font: font])
-        return NSSize(width: ceil(raw.width), height: ceil(raw.height))
+        return NSSize(width: ceil(raw.width) + 6, height: ceil(raw.height) + 2)
     }
 
     static func drawTick(from start: NSPoint, to end: NSPoint) {
@@ -412,17 +412,18 @@ enum AxisLabelChrome {
     static func drawLabel(_ label: String, textOrigin: NSPoint, in view: NSView) {
         let textRect = NSRect(origin: textOrigin, size: size(of: label))
         drawFade(around: textRect)
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.saveGState()
-        ctx.setShadow(offset: .zero, blur: 2.5, color: NSColor.black.withAlphaComponent(0.9).cgColor)
-        let cell = NSTextFieldCell(textCell: label)
-        cell.font = font
-        cell.textColor = .white
-        cell.drawsBackground = false
-        cell.isBordered = false
-        cell.alignment = .left
-        cell.draw(withFrame: textRect, in: view)
-        ctx.restoreGState()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .shadow: {
+                let shadow = NSShadow()
+                shadow.shadowOffset = .zero
+                shadow.shadowBlurRadius = 2.5
+                shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
+                return shadow
+            }()
+        ]
+        (label as NSString).draw(at: textOrigin, withAttributes: attributes)
     }
 
     private static func drawFade(around textRect: NSRect) {
