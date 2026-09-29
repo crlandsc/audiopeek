@@ -194,6 +194,7 @@ struct SettingsBlob: Equatable {
     var showWaveform: Bool
     var showSpectrogram: Bool
     var showFrequencyAxis: Bool
+    var showTimeAxis: Bool
     var waveformDual: Bool
     var spectrogramDual: Bool
     var waveformAmplitude: WaveformAmplitude
@@ -213,6 +214,7 @@ struct SettingsBlob: Equatable {
         showWaveform: true,
         showSpectrogram: true,
         showFrequencyAxis: false,
+        showTimeAxis: false,
         waveformDual: true,
         spectrogramDual: false,
         waveformAmplitude: .linear,
@@ -235,6 +237,7 @@ extension SettingsBlob: Codable {
         case showWaveform
         case showSpectrogram
         case showFrequencyAxis
+        case showTimeAxis
         case waveformDual
         case spectrogramDual
         case waveformAmplitude
@@ -256,6 +259,7 @@ extension SettingsBlob: Codable {
         showWaveform = try container.decode(Bool.self, forKey: .showWaveform)
         showSpectrogram = try container.decode(Bool.self, forKey: .showSpectrogram)
         showFrequencyAxis = try container.decodeIfPresent(Bool.self, forKey: .showFrequencyAxis) ?? false
+        showTimeAxis = try container.decodeIfPresent(Bool.self, forKey: .showTimeAxis) ?? false
         waveformDual = try container.decode(Bool.self, forKey: .waveformDual)
         spectrogramDual = try container.decode(Bool.self, forKey: .spectrogramDual)
         waveformAmplitude = try container.decode(WaveformAmplitude.self, forKey: .waveformAmplitude)
@@ -277,6 +281,7 @@ extension SettingsBlob: Codable {
         try container.encode(showWaveform, forKey: .showWaveform)
         try container.encode(showSpectrogram, forKey: .showSpectrogram)
         try container.encode(showFrequencyAxis, forKey: .showFrequencyAxis)
+        try container.encode(showTimeAxis, forKey: .showTimeAxis)
         try container.encode(waveformDual, forKey: .waveformDual)
         try container.encode(spectrogramDual, forKey: .spectrogramDual)
         try container.encode(waveformAmplitude, forKey: .waveformAmplitude)
