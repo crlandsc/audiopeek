@@ -1,4 +1,5 @@
 import AppKit
+import AVFAudio
 import XCTest
 @testable import AudioPeek
 
