@@ -105,7 +105,7 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
 
     func testResizeDragRestartsTheOverviewOnceAndDoesNotStartASecondPlayback() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-resize-\(UUID().uuidString).wav")
-        try writeWav(to: url, frames: 16_000)
+        try writeWav(to: url, frames: 44_100 * 8)
         defer { try? FileManager.default.removeItem(at: url) }
         let slip = makeSlip()
         slip.setInjectedLoad(thermal: "nominal", cpu: 0.1, applyNow: false)
