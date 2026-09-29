@@ -511,7 +511,6 @@ enum AxisLabelChrome {
         if let clip {
             ctx.clip(to: clip)
         }
-        ctx.setShadow(offset: .zero, blur: 1.2, color: NSColor.black.withAlphaComponent(0.8).cgColor)
         ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.95).cgColor)
         ctx.setLineWidth(1)
         ctx.setLineCap(.butt)
@@ -529,14 +528,9 @@ enum AxisLabelChrome {
         }
         let glyphs = NSRect(origin: textOrigin, size: glyphSize(of: label))
         drawFade(around: glyphs)
-        let shadow = NSShadow()
-        shadow.shadowOffset = .zero
-        shadow.shadowBlurRadius = 1.5
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white,
-            .shadow: shadow
+            .foregroundColor: NSColor.white
         ]
         (label as NSString).draw(at: textOrigin, withAttributes: attributes)
         ctx.restoreGState()
@@ -546,14 +540,9 @@ enum AxisLabelChrome {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
         ctx.clip(to: clip)
-        let shadow = NSShadow()
-        shadow.shadowOffset = .zero
-        shadow.shadowBlurRadius = 1.2
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: unitFont,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.55),
-            .shadow: shadow
+            .foregroundColor: NSColor.white.withAlphaComponent(0.72)
         ]
         (text as NSString).draw(at: frame.origin, withAttributes: attributes)
         ctx.restoreGState()
