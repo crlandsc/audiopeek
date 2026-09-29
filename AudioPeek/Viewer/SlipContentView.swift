@@ -605,8 +605,7 @@ final class SlipContentView: NSView {
     let hoverPollInterval: TimeInterval = 1.0 / 60.0
     private var hoverTimer: Timer?
     private var hoverCursorHeld = false
-    private var systemCursorHidden = false
-    private var cursorWindow: NSWindow?
+    private var previousFront: NSRunningApplication?
     var hoverPollIsRunning: Bool { hoverTimer?.isValid == true }
 
     override var isFlipped: Bool { true }
@@ -936,62 +935,33 @@ final class SlipContentView: NSView {
     private func applyHoverCursor(_ cursor: NSCursor?) {
         let resize = cursor.flatMap { $0 === NSCursor.arrow ? nil : $0 }
         guard let resize else {
+            restoreFrontApp()
             endHoverCursor()
             return
         }
-        showHoverCursor(resize)
-        if !systemCursorHidden {
-            CGDisplayHideCursor(CGMainDisplayID())
-            systemCursorHidden = true
+        // Finder owns the cursor while it is front, and it ignores both
+        // NSCursor.set and CGDisplayHideCursor from an inactive app.
+        // Take activation only for the resize zone, then give it back.
+        if previousFront == nil, !NSApp.isActive {
+            previousFront = NSWorkspace.shared.frontmostApplication
+            NSApp.activate(ignoringOtherApps: true)
         }
+        resize.set()
         hoverCursorHeld = true
     }
 
-    private func showHoverCursor(_ cursor: NSCursor) {
-        let image = cursor.image
-        let mouse = NSEvent.mouseLocation
-        let size = image.size
-        let frame = NSRect(
-            x: mouse.x - cursor.hotSpot.x,
-            y: mouse.y - cursor.hotSpot.y,
-            width: max(size.width, 1),
-            height: max(size.height, 1)
-        )
-        let window: NSWindow
-        if let cursorWindow {
-            window = cursorWindow
-        } else {
-            let created = NSWindow(
-                contentRect: frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            created.backgroundColor = .clear
-            created.isOpaque = false
-            created.hasShadow = false
-            created.ignoresMouseEvents = true
-            created.level = .screenSaver
-            created.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-            let view = NSImageView(frame: NSRect(origin: .zero, size: frame.size))
-            view.imageScaling = .scaleNone
-            created.contentView = view
-            cursorWindow = created
-            window = created
+    private func restoreFrontApp() {
+        guard let previous = previousFront else { return }
+        previousFront = nil
+        if previous.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previous.activate(options: [])
         }
-        (window.contentView as? NSImageView)?.image = image
-        window.setFrame(frame, display: true)
-        window.orderFrontRegardless()
     }
 
     private func endHoverCursor() {
-        cursorWindow?.orderOut(nil)
-        if systemCursorHidden {
-            CGDisplayShowCursor(CGMainDisplayID())
-            systemCursorHidden = false
-        }
         guard hoverCursorHeld else { return }
         hoverCursorHeld = false
+        NSCursor.arrow.set()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
