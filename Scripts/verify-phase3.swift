@@ -181,7 +181,7 @@ Check.expect(state["slipVisible"]?.bool == true, "the file opens the panel")
 Check.expect(state["playbackRunning"]?.bool == true, "autoplay starts on a clear sample")
 Check.expect((state["playheadSeconds"]?.double ?? 1) < 0.2, "autoplay starts near 0, got \(state["playheadSeconds"]?.double ?? -1)")
 Check.expect(abs((state["durationSeconds"]?.double ?? 0) - 1.2) < 0.05, "duration \(state["durationSeconds"]?.double ?? 0)")
-Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:01", "metadata \(state["slipMetadata"]?.string ?? "")")
+Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:00 / 0:01", "metadata \(state["slipMetadata"]?.string ?? "")")
 Check.expect(state["volumeKeyPresent"]?.bool == false, "autoplay does not create the volume key")
 
 state = command("pressPlay")

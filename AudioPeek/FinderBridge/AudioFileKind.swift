@@ -34,7 +34,8 @@ enum AudioFileKind {
         channels: Int,
         duration: TimeInterval,
         waveformShowing: Int? = nil,
-        spectrogramShowing: Int? = nil
+        spectrogramShowing: Int? = nil,
+        position: TimeInterval? = nil
     ) -> String {
         let khz = sampleRate / 1000
         let rate: String
@@ -43,8 +44,13 @@ enum AudioFileKind {
         } else {
             rate = String(format: "%.1f kHz", khz)
         }
-        let whole = max(0, Int(duration.rounded(.down)))
-        let clock = "\(whole / 60):" + String(format: "%02d", whole % 60)
+        let durationClock = clock(duration)
+        let time: String
+        if let position {
+            time = "\(clock(position)) / \(durationClock)"
+        } else {
+            time = durationClock
+        }
         var phrases: [String] = []
         if let waveformShowing, waveformShowing < channels {
             phrases.append("\(channels) ch · showing \(waveformShowing)")
@@ -53,6 +59,11 @@ enum AudioFileKind {
             phrases.append("\(channels) ch · showing \(spectrogramShowing)")
         }
         let channelText = phrases.isEmpty ? "\(channels) ch" : phrases.joined(separator: " · ")
-        return "\(format) · \(rate) · \(channelText) · \(clock)"
+        return "\(format) · \(rate) · \(channelText) · \(time)"
+    }
+
+    static func clock(_ seconds: TimeInterval) -> String {
+        let whole = max(0, Int(seconds.rounded(.down)))
+        return "\(whole / 60):" + String(format: "%02d", whole % 60)
     }
 }
