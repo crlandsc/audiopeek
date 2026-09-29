@@ -152,7 +152,7 @@ func settingsWindowID() -> CGWindowID? {
     for window in info {
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let title = window[kCGWindowName as String] as? String ?? ""
-        if owner == "AudioPeek" && title == "AudioPeek Settings" {
+        if owner == "AudioPeek" && (title.isEmpty || title == "AudioPeek Settings") {
             return window[kCGWindowNumber as String] as? CGWindowID
         }
     }
