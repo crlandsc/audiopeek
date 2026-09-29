@@ -605,6 +605,8 @@ final class SlipContentView: NSView {
     let hoverPollInterval: TimeInterval = 1.0 / 60.0
     private var hoverTimer: Timer?
     private var hoverCursorHeld = false
+    private var systemCursorHidden = false
+    private var cursorWindow: NSWindow?
     var hoverPollIsRunning: Bool { hoverTimer?.isValid == true }
 
     override var isFlipped: Bool { true }
@@ -915,7 +917,9 @@ final class SlipContentView: NSView {
             return
         }
         let screen = NSEvent.mouseLocation
-        let panelHit = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber
+        let frame = window.frame
+        let panelHit = frame.contains(screen)
+            || NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber
         let local = convert(window.convertPoint(fromScreen: screen), from: nil)
         applyHoverCursor(hoverCursor(at: local, panelHit: panelHit))
     }
@@ -930,18 +934,64 @@ final class SlipContentView: NSView {
     }
 
     private func applyHoverCursor(_ cursor: NSCursor?) {
-        if let cursor {
-            cursor.set()
-            hoverCursorHeld = true
-        } else {
+        let resize = cursor.flatMap { $0 === NSCursor.arrow ? nil : $0 }
+        guard let resize else {
             endHoverCursor()
+            return
         }
+        showHoverCursor(resize)
+        if !systemCursorHidden {
+            NSCursor.hide()
+            systemCursorHidden = true
+        }
+        hoverCursorHeld = true
+    }
+
+    private func showHoverCursor(_ cursor: NSCursor) {
+        let image = cursor.image
+        let mouse = NSEvent.mouseLocation
+        let size = image.size
+        let frame = NSRect(
+            x: mouse.x - cursor.hotSpot.x,
+            y: mouse.y - cursor.hotSpot.y,
+            width: max(size.width, 1),
+            height: max(size.height, 1)
+        )
+        let window: NSWindow
+        if let cursorWindow {
+            window = cursorWindow
+        } else {
+            let created = NSWindow(
+                contentRect: frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            created.backgroundColor = .clear
+            created.isOpaque = false
+            created.hasShadow = false
+            created.ignoresMouseEvents = true
+            created.level = .screenSaver
+            created.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            let view = NSImageView(frame: NSRect(origin: .zero, size: frame.size))
+            view.imageScaling = .scaleNone
+            created.contentView = view
+            cursorWindow = created
+            window = created
+        }
+        (window.contentView as? NSImageView)?.image = image
+        window.setFrame(frame, display: true)
+        window.orderFrontRegardless()
     }
 
     private func endHoverCursor() {
+        cursorWindow?.orderOut(nil)
+        if systemCursorHidden {
+            NSCursor.unhide()
+            systemCursorHidden = false
+        }
         guard hoverCursorHeld else { return }
         hoverCursorHeld = false
-        NSCursor.arrow.set()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
