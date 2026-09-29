@@ -12,9 +12,17 @@ The menu and the settings window say AudioPeek Settings. When the Dock icon and 
 
 ## Install
 
-Download the disk image from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications.
+Download the disk image from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications. Eject the disk image, then open AudioPeek from Applications.
 
-macOS may block the first open because the app is ad-hoc signed. Try to open AudioPeek, then click Open Anyway in System Settings > Privacy & Security. Apple describes this in [Safely open apps on your Mac](https://support.apple.com/en-us/102445).
+The first open is blocked. macOS shows: Apple could not verify "AudioPeek.app" is free of malware that may harm your Mac or compromise your privacy.
+
+That message is expected. AudioPeek is ad-hoc signed, not notarized by Apple, so you allow it yourself:
+
+1. In that dialog, click Done. Do not move the app to the Trash.
+2. Open System Settings > Privacy & Security.
+3. In the Security section, find AudioPeek and click Open Anyway, then Open.
+
+You do this once for each new disk image. A newer image is a new signature, so replacing the app asks again. Apple describes the same path in [Safely open apps on your Mac](https://support.apple.com/en-us/102445).
 
 ## Login items
 
