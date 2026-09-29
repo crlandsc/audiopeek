@@ -384,7 +384,18 @@ Check.expect(state["slipFilename"]?.string == "tone.wav", "one local wav shows t
 
 let generationBeforePanelHide = state["generation"]?.int ?? 0
 post("pressViewerHotkey")
-guard let panelHidden = waitForState(at: fresh.stateURL, above: generationBeforePanelHide) else {
+let hideDeadline = Date().addingTimeInterval(2)
+var panelHidden: JSONValue?
+while Date() < hideDeadline {
+    if let candidate = readState(at: fresh.stateURL),
+       (candidate["generation"]?.int ?? 0) > generationBeforePanelHide,
+       candidate["slipVisible"]?.bool == false {
+        panelHidden = candidate
+        break
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+}
+guard let panelHidden else {
     Check.expect(false, "panel hide state")
     print("PHASE1 FAIL")
     stopRunningApps()
