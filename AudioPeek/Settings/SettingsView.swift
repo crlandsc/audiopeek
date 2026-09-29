@@ -139,6 +139,11 @@ struct SettingsView: View {
                             Text("Log frequency").tag(SpectrogramType.logFrequency)
                             Text("Mel").tag(SpectrogramType.mel)
                         }
+                        Toggle("Frequency axis", isOn: store.binding(\.showFrequencyAxis))
+                            .accessibilityIdentifier("spectrogram.frequencyAxis")
+                        Text("Frequencies along the left of the spectrogram, from 20 Hz up to Nyquist.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Picker("Colors", selection: store.binding(\.spectrogram.colorMap)) {
                             Text("Magma").tag(SpectrogramColorMap.magma)
                             Text("Inferno").tag(SpectrogramColorMap.inferno)

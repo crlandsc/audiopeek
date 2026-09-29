@@ -26,6 +26,7 @@ final class PlaybackController {
     private var clockAnchorSample: AVAudioFramePosition?
     private var clockAnchorUptime: TimeInterval?
     private(set) var isPlaying = false
+    private(set) var playStartCount = 0
     private(set) var position: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     private(set) var info: OpenedAudio?
@@ -256,6 +257,7 @@ final class PlaybackController {
                 }
             }
             node.play()
+            playStartCount += 1
             isPlaying = true
             onChange()
         } catch {

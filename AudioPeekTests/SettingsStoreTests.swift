@@ -59,6 +59,7 @@ final class SettingsStoreTests: XCTestCase {
             $0.didAttemptFirstLoginRegistration = true
             $0.showWaveform = false
             $0.showSpectrogram = false
+            $0.showFrequencyAxis = true
             $0.waveformDual = false
             $0.spectrogramDual = true
             $0.waveformAmplitude = .decibels

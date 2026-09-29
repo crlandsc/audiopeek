@@ -31,6 +31,242 @@ struct SlipPalette {
     }
 }
 
+struct SlipResizeEdges: Equatable {
+    var left = false
+    var right = false
+    var top = false
+    var bottom = false
+
+    var isActive: Bool { left || right || top || bottom }
+
+    var axis: SlipResizeAxis? {
+        if (left && top) || (right && bottom) { return .diagonalUpLeft }
+        if (right && top) || (left && bottom) { return .diagonalUpRight }
+        if left || right { return .horizontal }
+        if top || bottom { return .vertical }
+        return nil
+    }
+}
+
+enum SlipResizeAxis: Equatable {
+    case horizontal
+    case vertical
+    case diagonalUpLeft
+    case diagonalUpRight
+
+    var cursor: NSCursor {
+        switch self {
+        case .horizontal:
+            return .resizeLeftRight
+        case .vertical:
+            return .resizeUpDown
+        case .diagonalUpLeft:
+            return .resizeUpLeftDownRight
+        case .diagonalUpRight:
+            return .resizeUpRightDownLeft
+        }
+    }
+}
+
+enum SlipResize {
+    static let margin: CGFloat = 8
+
+    static func edges(at point: NSPoint, in bounds: NSRect) -> SlipResizeEdges {
+        guard bounds.width > 0, bounds.height > 0 else { return SlipResizeEdges() }
+        guard point.x >= bounds.minX, point.x <= bounds.maxX,
+              point.y >= bounds.minY, point.y <= bounds.maxY else {
+            return SlipResizeEdges()
+        }
+        var left = point.x <= bounds.minX + margin
+        var right = point.x >= bounds.maxX - margin
+        var top = point.y <= bounds.minY + margin
+        var bottom = point.y >= bounds.maxY - margin
+        if left && right {
+            if point.x - bounds.minX <= bounds.maxX - point.x {
+                right = false
+            } else {
+                left = false
+            }
+        }
+        if top && bottom {
+            if point.y - bounds.minY <= bounds.maxY - point.y {
+                bottom = false
+            } else {
+                top = false
+            }
+        }
+        return SlipResizeEdges(left: left, right: right, top: top, bottom: bottom)
+    }
+
+    static func resizedFrame(
+        start: NSRect,
+        startMouse: NSPoint,
+        mouse: NSPoint,
+        edges: SlipResizeEdges,
+        minSize: NSSize
+    ) -> NSRect {
+        var frame = start
+        let dx = mouse.x - startMouse.x
+        let dy = mouse.y - startMouse.y
+        if edges.right {
+            frame.size.width = max(minSize.width, start.width + dx)
+        }
+        if edges.left {
+            let width = max(minSize.width, start.width - dx)
+            frame.origin.x = start.origin.x + (start.width - width)
+            frame.size.width = width
+        }
+        if edges.top {
+            frame.size.height = max(minSize.height, start.height + dy)
+        }
+        if edges.bottom {
+            let height = max(minSize.height, start.height - dy)
+            frame.origin.y = start.origin.y + (start.height - height)
+            frame.size.height = height
+        }
+        return frame
+    }
+}
+
+enum FrequencyAxisTicks {
+    static let audibleFloor = 20.0
+    static let labelHeight: CGFloat = 12
+    static let minSeparation: CGFloat = labelHeight + 4
+
+    struct Tick: Equatable {
+        var hertz: Double
+        var centerY: CGFloat
+        var label: String
+    }
+
+    static func layout(height: CGFloat, nyquist: Double, labelHeight: CGFloat = FrequencyAxisTicks.labelHeight) -> [Tick] {
+        guard height > 0, nyquist > audibleFloor else { return [] }
+        let separation = labelHeight + 4
+        let pad: CGFloat = 2
+        let half = labelHeight / 2
+        let minY = half + pad
+        let maxY = height - half - pad
+        guard maxY >= minY else { return [] }
+        let usable = maxY - minY
+        let capacity = max(1, Int(floor(usable / separation)) + 1)
+        let span = nyquist - audibleFloor
+        var step = niceStep(span / Double(max(capacity - 1, 1)))
+        var placed: [Tick] = []
+        for _ in 0..<8 {
+            let ticks = frequencies(nyquist: nyquist, step: step)
+            placed = place(
+                ticks,
+                height: height,
+                nyquist: nyquist,
+                minY: minY,
+                maxY: maxY,
+                separation: separation,
+                labelHeight: labelHeight
+            )
+            if !placed.isEmpty, placed.count <= capacity, separated(placed, by: separation) {
+                return placed
+            }
+            step = niceStep(step * 2.01)
+        }
+        return placed
+    }
+
+    static func format(_ hertz: Double) -> String {
+        if hertz >= 1000 {
+            let kilo = hertz / 1000
+            if abs(kilo - kilo.rounded()) < 0.049 {
+                return "\(Int(kilo.rounded())) kHz"
+            }
+            return String(format: "%.1f kHz", kilo)
+        }
+        return "\(Int(hertz.rounded())) Hz"
+    }
+
+    private static func niceStep(_ raw: Double) -> Double {
+        let value = max(raw, 1)
+        let exponent = pow(10, floor(log10(value)))
+        let fraction = value / exponent
+        let nice: Double
+        if fraction <= 1 {
+            nice = 1
+        } else if fraction <= 2 {
+            nice = 2
+        } else if fraction <= 5 {
+            nice = 5
+        } else {
+            nice = 10
+        }
+        return nice * exponent
+    }
+
+    private static func frequencies(nyquist: Double, step: Double) -> [Double] {
+        guard step > 0 else { return [audibleFloor, nyquist] }
+        var values = [audibleFloor]
+        var cursor = ceil((audibleFloor + step * 0.01) / step) * step
+        while cursor < nyquist - step * 0.15 {
+            if cursor > audibleFloor + 0.001 {
+                values.append(cursor)
+            }
+            cursor += step
+        }
+        if let last = values.last, abs(last - nyquist) > 0.001 {
+            values.append(nyquist)
+        }
+        return values
+    }
+
+    private static func place(
+        _ frequencies: [Double],
+        height: CGFloat,
+        nyquist: Double,
+        minY: CGFloat,
+        maxY: CGFloat,
+        separation: CGFloat,
+        labelHeight: CGFloat
+    ) -> [Tick] {
+        func yPosition(_ hertz: Double) -> CGFloat {
+            let span = nyquist - audibleFloor
+            let unit = (hertz - audibleFloor) / span
+            return height * CGFloat(1 - unit)
+        }
+        func clamp(_ value: CGFloat) -> CGFloat {
+            min(maxY, max(minY, value))
+        }
+        var kept: [(Double, CGFloat)] = []
+        func tryAdd(_ hertz: Double) {
+            let center = clamp(yPosition(hertz))
+            let top = center - labelHeight / 2
+            let bottom = center + labelHeight / 2
+            guard top >= -0.01, bottom <= height + 0.01 else { return }
+            for existing in kept where abs(existing.1 - center) < separation - 0.01 {
+                return
+            }
+            kept.append((hertz, center))
+        }
+        if let first = frequencies.first {
+            tryAdd(first)
+        }
+        if let last = frequencies.last, frequencies.count > 1 {
+            tryAdd(last)
+        }
+        if frequencies.count > 2 {
+            for hertz in frequencies.dropFirst().dropLast() {
+                tryAdd(hertz)
+            }
+        }
+        return kept
+            .sorted { $0.1 < $1.1 }
+            .map { Tick(hertz: $0.0, centerY: $0.1, label: format($0.0)) }
+    }
+
+    private static func separated(_ ticks: [Tick], by separation: CGFloat) -> Bool {
+        for index in 1..<ticks.count where ticks[index].centerY - ticks[index - 1].centerY < separation - 0.01 {
+            return false
+        }
+        return true
+    }
+}
+
 final class SlipContentView: NSView {
     let playButton = NSButton()
     let filenameLabel = NSTextField(labelWithString: "")
@@ -52,7 +288,8 @@ final class SlipContentView: NSView {
     var onSplit: (Double) -> Void = { _ in }
     var onSeek: (String, Double) -> Void = { _, _ in }
     var onScrub: (String, Double, ScrubPhase) -> Void = { _, _, _ in }
-    var onResizeEnd: () -> Void = {}
+    var onResizeBegan: () -> Void = {}
+    var onResizeEnded: () -> Void = {}
     var onAppearance: () -> Void = {}
     var onRevealTargetRaised: () -> Void = {}
     private var playheadFraction = 0.0
@@ -65,6 +302,8 @@ final class SlipContentView: NSView {
     private var palette = SlipPalette.current(NSApp.effectiveAppearance)
     private var showProgress = false
     private var progressFraction = 0.0
+    private(set) var isResizeDrag = false
+    private var resizeTracking: NSTrackingArea?
 
     override var isFlipped: Bool { true }
 
@@ -277,9 +516,63 @@ final class SlipContentView: NSView {
         return (Double(rgb.redComponent), Double(rgb.greenComponent), Double(rgb.blueComponent))
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let resizeTracking {
+            removeTrackingArea(resizeTracking)
+        }
+        // Cursor rects only apply while the window is key. This panel cannot
+        // become key, so the tracking area sets the resize cursor itself.
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        resizeTracking = area
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        discardCursorRects()
+        let margin = SlipResize.margin
+        let width = bounds.width
+        let height = bounds.height
+        guard width > margin * 2, height > margin * 2 else { return }
+        addCursorRect(NSRect(x: margin, y: 0, width: width - margin * 2, height: margin), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: margin, y: height - margin, width: width - margin * 2, height: margin), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: 0, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: width - margin, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: 0, y: 0, width: margin, height: margin), cursor: .resizeUpLeftDownRight)
+        addCursorRect(NSRect(x: width - margin, y: 0, width: margin, height: margin), cursor: .resizeUpRightDownLeft)
+        addCursorRect(NSRect(x: 0, y: height - margin, width: margin, height: margin), cursor: .resizeUpRightDownLeft)
+        addCursorRect(NSRect(x: width - margin, y: height - margin, width: margin, height: margin), cursor: .resizeUpLeftDownRight)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        applyResizeCursor(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        applyResizeCursor(convert(event.locationInWindow, from: nil))
+    }
+
+    func resizeCursor(at point: NSPoint) -> NSCursor? {
+        SlipResize.edges(at: point, in: bounds).axis?.cursor
+    }
+
+    private func applyResizeCursor(_ point: NSPoint) {
+        if let cursor = resizeCursor(at: point) {
+            cursor.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        if splitHit(local) || resizeEdges(local) != (false, false) || headerBackground(local) {
+        if splitHit(local) || SlipResize.edges(at: local, in: bounds).isActive || headerBackground(local) {
             return self
         }
         return super.hitTest(point)
@@ -306,8 +599,8 @@ final class SlipContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
-        let edges = resizeEdges(local)
-        if edges.right || edges.bottom {
+        let edges = SlipResize.edges(at: local, in: bounds)
+        if edges.isActive {
             resizeWindow(from: event, edges: edges)
             return
         }
@@ -331,33 +624,59 @@ final class SlipContentView: NSView {
         }
     }
 
-    private func resizeEdges(_ point: NSPoint) -> (right: Bool, bottom: Bool) {
-        let margin: CGFloat = 8
-        return (point.x >= bounds.width - margin, point.y >= bounds.height - margin)
+    func beginResizeStretch() {
+        guard !isResizeDrag else { return }
+        isResizeDrag = true
+        waveformPane.beginStretch()
+        spectrogramPane.beginStretch()
     }
 
-    private func resizeWindow(from event: NSEvent, edges: (right: Bool, bottom: Bool)) {
-        guard let window else { return }
+    func endResizeStretch() {
+        guard isResizeDrag else { return }
+        isResizeDrag = false
+        waveformPane.endStretch()
+        spectrogramPane.endStretch()
+    }
+
+    func redisplayPicture() {
+        waveformPane.needsDisplay = true
+        spectrogramPane.needsDisplay = true
+        needsDisplay = true
+    }
+
+    private func resizeWindow(from event: NSEvent, edges: SlipResizeEdges) {
+        guard let window, !isResizeDrag else { return }
+        onResizeBegan()
+        let cursor = edges.axis?.cursor
+        cursor?.set()
         let startFrame = window.frame
         let startMouse = NSEvent.mouseLocation
+        let minSize = window.minSize
+        var ended = false
         window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: NSEvent.foreverDuration, mode: .eventTracking) { event, stop in
-            guard let event else { return }
-            if event.type == .leftMouseUp {
+            guard let event else {
                 stop.pointee = true
-                self.onResizeEnd()
                 return
             }
-            let mouse = NSEvent.mouseLocation
-            var frame = startFrame
-            if edges.right {
-                frame.size.width = max(window.minSize.width, startFrame.width + mouse.x - startMouse.x)
+            if event.type == .leftMouseUp {
+                ended = true
+                stop.pointee = true
+                self.onResizeEnded()
+                return
             }
-            if edges.bottom {
-                let delta = mouse.y - startMouse.y
-                frame.origin.y = startFrame.origin.y + delta
-                frame.size.height = max(window.minSize.height, startFrame.height - delta)
-            }
-            window.setFrame(frame, display: true)
+            cursor?.set()
+            let frame = SlipResize.resizedFrame(
+                start: startFrame,
+                startMouse: startMouse,
+                mouse: NSEvent.mouseLocation,
+                edges: edges,
+                minSize: minSize
+            )
+            window.setFrame(frame, display: false)
+            self.layoutSubtreeIfNeeded()
+        }
+        if !ended {
+            onResizeEnded()
         }
     }
 
@@ -465,6 +784,10 @@ final class SlipContentView: NSView {
         spectrogramPane.clearSpectrogram()
     }
 
+    func setFrequencyAxis(shown: Bool, sampleRate: Double) {
+        spectrogramPane.setFrequencyAxis(shown: shown, sampleRate: sampleRate)
+    }
+
 }
 
 enum ScrubPhase {
@@ -489,6 +812,9 @@ final class SlipPaneView: NSView {
     var onRevealTargetRaised: () -> Void = {}
     var revealedColumnCount: CGFloat { revealedColumns }
     var revealTarget: CGFloat { targetColumns }
+    private(set) var showsFrequencyAxis = false
+    private var frequencyNyquist = 0.0
+    private var stretching = false
 
     override var isFlipped: Bool { true }
 
@@ -557,6 +883,34 @@ final class SlipPaneView: NSView {
         needsDisplay = true
     }
 
+    func setFrequencyAxis(shown: Bool, sampleRate: Double) {
+        let nyquist = sampleRate > 0 ? sampleRate / 2 : 0
+        let changed = shown != showsFrequencyAxis || nyquist != frequencyNyquist
+        showsFrequencyAxis = shown
+        frequencyNyquist = nyquist
+        if changed, !stretching {
+            needsDisplay = true
+        }
+    }
+
+    var frequencyTickLabels: [String] {
+        guard showsFrequencyAxis else { return [] }
+        return FrequencyAxisTicks.layout(height: bounds.height, nyquist: frequencyNyquist).map(\.label)
+    }
+
+    func beginStretch() {
+        wantsLayer = true
+        stretching = true
+        layerContentsRedrawPolicy = .never
+        layer?.contentsGravity = .resize
+    }
+
+    func endStretch() {
+        stretching = false
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        layer?.contentsGravity = .resize
+    }
+
     private func nextSpectrogramBuild() -> Int {
         buildLock.lock()
         spectrogramBuild += 1
@@ -573,6 +927,7 @@ final class SlipPaneView: NSView {
     }
 
     func advanceReveal() {
+        if stretching { return }
         let gap = targetColumns - revealedColumns
         if revealCaughtUp {
             guard revealedColumns != targetColumns else { return }
@@ -610,6 +965,7 @@ final class SlipPaneView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         if !spectrogramImages.isEmpty {
             drawSpectrogram()
+            drawFrequencyAxis()
             return
         }
         guard columnCount > 0, let lane = lanes.first, !lane.isEmpty else { return }
@@ -674,6 +1030,77 @@ final class SlipPaneView: NSView {
             let drawWidth = bounds.width * filled / total
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: drawWidth, height: rect.height))
             ctx.restoreGState()
+        }
+    }
+
+    private func drawFrequencyAxis() {
+        guard showsFrequencyAxis, frequencyNyquist > FrequencyAxisTicks.audibleFloor else { return }
+        let images = spectrogramImages.isEmpty ? 1 : spectrogramImages.count
+        let gap: CGFloat = images > 1 ? 3 : 0
+        let laneHeight = max(1, (bounds.height - gap * CGFloat(max(images - 1, 0))) / CGFloat(images))
+        for index in 0..<images {
+            let lane = CGRect(
+                x: 0,
+                y: CGFloat(index) * (laneHeight + gap),
+                width: bounds.width,
+                height: laneHeight
+            )
+            drawFrequencyLabels(in: lane)
+        }
+    }
+
+    private func drawFrequencyLabels(in lane: CGRect) {
+        let ticks = FrequencyAxisTicks.layout(height: lane.height, nyquist: frequencyNyquist)
+        guard !ticks.isEmpty else { return }
+        let axis = NSBezierPath()
+        axis.move(to: NSPoint(x: lane.minX + 3, y: lane.minY + 4))
+        axis.line(to: NSPoint(x: lane.minX + 3, y: lane.maxY - 4))
+        axis.lineWidth = 1
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.8)
+        shadow.shadowOffset = .zero
+        shadow.shadowBlurRadius = 1.5
+        shadow.set()
+        NSColor.white.withAlphaComponent(0.72).setStroke()
+        axis.stroke()
+        shadow.shadowBlurRadius = 0
+        shadow.set()
+        let font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let textColor = NSColor.white.withAlphaComponent(0.96)
+        let backing = NSColor.black.withAlphaComponent(0.5)
+        for tick in ticks {
+            let text = tick.label as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: textColor
+            ]
+            let size = text.size(withAttributes: attributes)
+            let rect = NSRect(
+                x: lane.minX + 7,
+                y: lane.minY + tick.centerY - size.height / 2 - 1,
+                width: size.width + 8,
+                height: size.height + 2
+            )
+            let chip = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+            let chipShadow = NSShadow()
+            chipShadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
+            chipShadow.shadowOffset = .zero
+            chipShadow.shadowBlurRadius = 2
+            chipShadow.set()
+            backing.setFill()
+            chip.fill()
+            chipShadow.shadowBlurRadius = 0
+            chipShadow.set()
+            let cell = NSTextFieldCell(textCell: tick.label)
+            cell.font = font
+            cell.textColor = textColor
+            cell.drawsBackground = false
+            cell.isBordered = false
+            cell.alignment = .left
+            cell.draw(
+                withFrame: NSRect(x: rect.minX + 4, y: rect.minY + 1, width: size.width, height: size.height),
+                in: self
+            )
         }
     }
 
