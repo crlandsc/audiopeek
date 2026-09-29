@@ -605,7 +605,6 @@ final class SlipContentView: NSView {
     let hoverPollInterval: TimeInterval = 1.0 / 60.0
     private var hoverTimer: Timer?
     private var hoverCursorHeld = false
-    private var previousFront: NSRunningApplication?
     var hoverPollIsRunning: Bool { hoverTimer?.isValid == true }
 
     override var isFlipped: Bool { true }
@@ -827,9 +826,9 @@ final class SlipContentView: NSView {
             endHoverCursor()
             return
         }
-        // Finder owns mouse-moved events while it is front, so a tracking area
-        // never hears the pointer. Poll the screen location instead. The panel
-        // stays non-key, and the cursor is set only while the pointer is inside.
+        // Cursor changes only while AudioPeek is already active. Activating
+        // the app to force a cursor makes Finder flicker, so this poll does
+        // not take focus.
         let timer = Timer(timeInterval: hoverPollInterval, repeats: true) { [weak self] _ in
             self?.sampleHoverCursor()
         }
@@ -933,29 +932,14 @@ final class SlipContentView: NSView {
     }
 
     private func applyHoverCursor(_ cursor: NSCursor?) {
+        guard NSApp.isActive else { return }
         let resize = cursor.flatMap { $0 === NSCursor.arrow ? nil : $0 }
         guard let resize else {
-            restoreFrontApp()
             endHoverCursor()
             return
         }
-        // Finder owns the cursor while it is front, and it ignores both
-        // NSCursor.set and CGDisplayHideCursor from an inactive app.
-        // Take activation only for the resize zone, then give it back.
-        if previousFront == nil, !NSApp.isActive {
-            previousFront = NSWorkspace.shared.frontmostApplication
-            NSApp.activate(ignoringOtherApps: true)
-        }
         resize.set()
         hoverCursorHeld = true
-    }
-
-    private func restoreFrontApp() {
-        guard let previous = previousFront else { return }
-        previousFront = nil
-        if previous.bundleIdentifier != Bundle.main.bundleIdentifier {
-            previous.activate(options: [])
-        }
     }
 
     private func endHoverCursor() {
