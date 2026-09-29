@@ -193,6 +193,7 @@ struct SettingsBlob: Equatable {
     var hotkey: HotkeyCombo
     var showWaveform: Bool
     var showSpectrogram: Bool
+    var showFrequencyAxis: Bool
     var waveformDual: Bool
     var spectrogramDual: Bool
     var waveformAmplitude: WaveformAmplitude
@@ -211,6 +212,7 @@ struct SettingsBlob: Equatable {
         hotkey: .optionSpace,
         showWaveform: true,
         showSpectrogram: true,
+        showFrequencyAxis: false,
         waveformDual: true,
         spectrogramDual: false,
         waveformAmplitude: .linear,
@@ -232,6 +234,7 @@ extension SettingsBlob: Codable {
         case hotkey
         case showWaveform
         case showSpectrogram
+        case showFrequencyAxis
         case waveformDual
         case spectrogramDual
         case waveformAmplitude
@@ -252,6 +255,7 @@ extension SettingsBlob: Codable {
         hotkey = try container.decode(HotkeyCombo.self, forKey: .hotkey)
         showWaveform = try container.decode(Bool.self, forKey: .showWaveform)
         showSpectrogram = try container.decode(Bool.self, forKey: .showSpectrogram)
+        showFrequencyAxis = try container.decodeIfPresent(Bool.self, forKey: .showFrequencyAxis) ?? false
         waveformDual = try container.decode(Bool.self, forKey: .waveformDual)
         spectrogramDual = try container.decode(Bool.self, forKey: .spectrogramDual)
         waveformAmplitude = try container.decode(WaveformAmplitude.self, forKey: .waveformAmplitude)
@@ -272,6 +276,7 @@ extension SettingsBlob: Codable {
         try container.encode(hotkey, forKey: .hotkey)
         try container.encode(showWaveform, forKey: .showWaveform)
         try container.encode(showSpectrogram, forKey: .showSpectrogram)
+        try container.encode(showFrequencyAxis, forKey: .showFrequencyAxis)
         try container.encode(waveformDual, forKey: .waveformDual)
         try container.encode(spectrogramDual, forKey: .spectrogramDual)
         try container.encode(waveformAmplitude, forKey: .waveformAmplitude)

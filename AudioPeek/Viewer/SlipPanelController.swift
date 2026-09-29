@@ -4,6 +4,24 @@ import AVFAudio
 final class SlipWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // A borderless resizable panel starts AppKit's own live-resize session on
+    // an edge mouse-down. That session keeps a cached frame (and the shadow
+    // window keeps the old shape) while the content view also setFrames this
+    // panel, so one drag shows two windows. Handle the edge here and do not
+    // let that session start.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown,
+           let content = contentView as? SlipContentView,
+           !content.isResizeDrag {
+            let local = content.convert(event.locationInWindow, from: nil)
+            if SlipResize.edges(at: local, in: content.bounds).isActive {
+                content.mouseDown(with: event)
+                return
+            }
+        }
+        super.sendEvent(event)
+    }
 }
 
 @MainActor
@@ -30,6 +48,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var playheadTimer: Timer?
     private var playToggleOpen = true
     private var frameSave: DispatchWorkItem?
+    private var isResizeDrag = false
+    private var resizeNeedsOverview = false
+    private var deferredFinderRead: FinderRead?
+    private(set) var panelsMade = 0
     private var epoch = 0
     private var inFlight = false
     private var currentURL: URL?
@@ -90,9 +112,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.onSplit = { [weak self] fraction in
             self?.store.update { $0.splitFraction = fraction }
         }
-        content.onResizeEnd = { [weak self] in
-            self?.scheduleFrameSave()
-            self?.restartIfColumnsMoved()
+        content.onResizeBegan = { [weak self] in
+            self?.beginResizeInteraction()
+        }
+        content.onResizeEnded = { [weak self] in
+            self?.endResizeInteraction()
         }
         overview.onSnapshot = { [weak self] snapshot in
             self?.applyOverview(snapshot)
@@ -176,6 +200,12 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     var overviewPeakPasses: Int { overviewSnapshot.peakPasses }
 
+    private(set) var overviewStartCount = 0
+
+    var playbackStartCount: Int { playback.playStartCount }
+
+    var frequencyTickLabels: [String] { content.spectrogramPane.frequencyTickLabels }
+
     var overviewFirstMaximum: Double {
         guard let column = overviewSnapshot.lanes.first?.first else { return 0 }
         return Double(column.maximum)
@@ -246,6 +276,13 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         )
         content.setLoop(next.loopEnabled)
         playback.setGain(store.effectiveVolume)
+        if isResizeDrag {
+            if pictureChanged(appliedBlob, next) {
+                resizeNeedsOverview = true
+            }
+            appliedBlob = next
+            return
+        }
         if let panel, let stored = next.windowFrame {
             let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
             if abs(panel.frame.origin.x - rect.origin.x) > 0.5
@@ -389,6 +426,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func apply(_ read: FinderRead) {
+        if isResizeDrag {
+            deferredFinderRead = read
+            return
+        }
         switch read {
         case .failed:
             stopPoll()
@@ -420,6 +461,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func show(_ url: URL) {
+        if isResizeDrag {
+            deferredFinderRead = .files([url])
+            return
+        }
         orderedOut = false
         let window = panel ?? makePanel()
         panel = window
@@ -545,6 +590,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func evaluateGate() {
+        if isResizeDrag { return }
         let sample = gate.sample()
         lastLoad = sample
         let allows = gate.allowsPlayback(sample)
@@ -607,6 +653,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makePanel() -> SlipWindow {
+        if let panel {
+            return panel
+        }
         let rect = storedFrame() ?? defaultFrame()
         let window = SlipWindow(
             contentRect: rect,
@@ -627,6 +676,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 420, height: 280)
         window.contentView = content
         window.delegate = self
+        window.acceptsMouseMovedEvents = true
+        panelsMade += 1
         if store.blob.windowFrame == nil {
             remember(window.frame)
         }
@@ -716,12 +767,63 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        if isResizeDrag { return }
         scheduleFrameSave()
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
+        if isResizeDrag { return }
         scheduleFrameSave()
         restartIfColumnsMoved()
+    }
+
+    func beginResizeInteraction() {
+        guard !isResizeDrag else { return }
+        isResizeDrag = true
+        if restartOverview != nil {
+            restartOverview?.cancel()
+            restartOverview = nil
+            resizeNeedsOverview = true
+        }
+        frameSave?.cancel()
+        panel?.hasShadow = false
+        content.beginResizeStretch()
+    }
+
+    func resizePanelForTest(_ rect: NSRect) {
+        guard isResizeDrag, let panel else { return }
+        panel.setFrame(rect, display: false)
+        content.layoutSubtreeIfNeeded()
+    }
+
+    func endResizeInteraction() {
+        guard isResizeDrag else { return }
+        let widthChanged = abs(paneColumnCount() - activeColumns) > 4
+        let needsPass = widthChanged || resizeNeedsOverview
+        resizeNeedsOverview = false
+        let deferred = deferredFinderRead
+        deferredFinderRead = nil
+        content.endResizeStretch()
+        isResizeDrag = false
+        if let panel {
+            panel.hasShadow = true
+            panel.invalidateShadow()
+        }
+        if let deferred {
+            apply(deferred)
+        }
+        if needsPass {
+            startOverviewNow()
+        } else {
+            syncFrequencyAxis()
+            content.redisplayPicture()
+        }
+        scheduleFrameSave()
+        evaluateGate()
+    }
+
+    func sampleGateForTest() {
+        evaluateGate()
     }
 
     private func applyOverview(_ snapshot: WaveformSnapshot) {
@@ -737,6 +839,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             retainedSpectrogram = merged.spectrogram
         }
         overviewSnapshot = merged
+        if isResizeDrag {
+            return
+        }
         let waveformBefore = content.waveformPane.revealTarget
         let spectrogramBefore = content.spectrogramPane.revealTarget
         content.setWaveform(
@@ -774,6 +879,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func paintSpectrogram() {
+        syncFrequencyAxis()
         let settings = store.blob.spectrogram
         let rate = playback.info?.sampleRate ?? 0
         let nyquist = rate / 2
@@ -793,6 +899,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     private func refreshPicture() {
+        syncFrequencyAxis()
         content.setWaveform(
             snapshot: overviewSnapshot,
             amplitude: store.blob.waveformAmplitude,
@@ -815,6 +922,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             colorMap: settings.colorMap
         )
         content.setProgress(visible: progressVisible, fraction: overviewSnapshot.progress)
+    }
+
+    private func syncFrequencyAxis() {
+        content.setFrequencyAxis(shown: store.blob.showFrequencyAxis, sampleRate: playback.info?.sampleRate ?? 0)
     }
 
     private var currentEstimate: Double {
@@ -917,6 +1028,11 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     func startOverviewNow() {
         restartOverview?.cancel()
+        restartOverview = nil
+        if isResizeDrag {
+            resizeNeedsOverview = true
+            return
+        }
         // The file is not connected yet. Leave whatever picture is up.
         guard playback.info != nil else { return }
         guard isVisible, let url = currentURL else {
@@ -949,6 +1065,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         activeSpec = spec
         activeColumns = columns
         if !waveDirty && !specDirty { return }
+        overviewStartCount += 1
         if waveDirty { retainedLanes = [] }
         if specDirty { retainedSpectrogram = [] }
         let inspect = OverviewDetail.inspectFrames(
