@@ -941,7 +941,7 @@ final class SlipContentView: NSView {
         }
         showHoverCursor(resize)
         if !systemCursorHidden {
-            NSCursor.hide()
+            CGDisplayHideCursor(CGMainDisplayID())
             systemCursorHidden = true
         }
         hoverCursorHeld = true
@@ -987,7 +987,7 @@ final class SlipContentView: NSView {
     private func endHoverCursor() {
         cursorWindow?.orderOut(nil)
         if systemCursorHidden {
-            NSCursor.unhide()
+            CGDisplayShowCursor(CGMainDisplayID())
             systemCursorHidden = false
         }
         guard hoverCursorHeld else { return }
