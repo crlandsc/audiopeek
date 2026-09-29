@@ -151,8 +151,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         // A cold launch can deliver the open before slip exists.
-        pendingOpens.append(urls)
+        // open App.app also delivers the bundle itself once document types exist. That is not a dropped file.
+        let files = urls.filter { !isApplicationBundle($0) }
+        guard !files.isEmpty else { return }
+        pendingOpens.append(files)
         deliverPendingOpens()
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    private func isApplicationBundle(_ url: URL) -> Bool {
+        let bundle = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = url.resolvingSymlinksInPath().standardizedFileURL
+        return candidate.path == bundle.path
     }
 
     private func deliverPendingOpens() {
@@ -171,9 +184,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openSettings() {
-        settingsWindow.show()
-        NSApp.activate()
+        // Document types make Launch Services activate a second open as a regular app.
+        // Putting the Dock policy back to accessory unmaps a window ordered front before that change.
         applyChrome()
+        NSApp.activate()
+        settingsWindow.show()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.settingsWindow != nil else { return }
+                self.settingsWindow.show()
+            }
+        }
     }
 
     private func applyChrome() {
