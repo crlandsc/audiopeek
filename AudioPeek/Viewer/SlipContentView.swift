@@ -211,6 +211,40 @@ enum FrequencyAxisTicks {
         return "\(Int(rounded))"
     }
 
+    static let unitText = "Hz"
+
+    static func labelFrame(for tick: Tick, in lane: NSRect) -> NSRect {
+        let labelSize = AxisLabelChrome.size(of: tick.label)
+        return NSRect(
+            x: lane.minX + 4 + AxisLabelChrome.tickLength + 3,
+            y: lane.minY + tick.centerY - labelSize.height / 2,
+            width: labelSize.width,
+            height: labelSize.height
+        )
+    }
+
+    static func placedUnit(ticks: [Tick], in area: NSRect, avoiding extra: [NSRect] = []) -> AxisPlacedUnit? {
+        let size = AxisLabelChrome.unitSize(unitText)
+        let labels = ticks.map { labelFrame(for: $0, in: area) }
+        var candidates: [NSRect] = []
+        if let top = labels.min(by: { $0.minY < $1.minY }) {
+            candidates.append(NSRect(x: top.maxX + 4, y: top.minY, width: size.width, height: size.height))
+            candidates.append(NSRect(x: top.minX, y: top.maxY + 4, width: size.width, height: size.height))
+        }
+        let right = (labels.map(\.maxX).max() ?? area.minX) + 4
+        candidates.append(NSRect(
+            x: right,
+            y: area.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        ))
+        if labels.isEmpty {
+            candidates.append(NSRect(x: area.minX + 4, y: area.minY + 2, width: size.width, height: size.height))
+        }
+        guard let frame = AxisMarkLayout.firstFit(candidates, in: area, avoiding: labels + extra) else { return nil }
+        return AxisPlacedUnit(text: unitText, frame: frame)
+    }
+
     private static func niceStep(_ raw: Double) -> Double {
         let value = max(raw, 1)
         let exponent = pow(10, floor(log10(value)))
@@ -370,6 +404,46 @@ enum TimeAxisTicks {
         return candidate
     }
 
+    static func unitText(duration: Double) -> String {
+        if duration >= 3600 { return "h:mm:ss" }
+        if duration >= 60 { return "min:sec" }
+        return "s"
+    }
+
+    static func labelFrame(for tick: Tick, width: CGFloat, tickTop: CGFloat) -> NSRect? {
+        guard !tick.label.isEmpty else { return nil }
+        let labelSize = AxisLabelChrome.size(of: tick.label)
+        var x = tick.centerX - labelSize.width / 2
+        x = min(max(1, x), max(1, width - labelSize.width - 1))
+        let y = tickTop - labelSize.height - 1
+        guard y >= 0 else { return nil }
+        return NSRect(x: x, y: y, width: labelSize.width, height: labelSize.height)
+    }
+
+    static func placedUnit(ticks: [Tick], duration: Double, pane: NSRect, tickTop: CGFloat) -> AxisPlacedUnit? {
+        let text = unitText(duration: duration)
+        let size = AxisLabelChrome.unitSize(text)
+        let labels = ticks.compactMap { labelFrame(for: $0, width: pane.width, tickTop: tickTop) }
+        var candidates: [NSRect] = []
+        let rowY = labels.map(\.minY).min() ?? (tickTop - size.height - 1)
+        let aboveY = rowY - size.height - 4
+        candidates.append(NSRect(x: pane.maxX - size.width - 4, y: aboveY, width: size.width, height: size.height))
+        candidates.append(NSRect(x: pane.minX + 4, y: aboveY, width: size.width, height: size.height))
+        candidates.append(NSRect(x: pane.maxX - size.width - 2, y: rowY, width: size.width, height: size.height))
+        let sorted = labels.sorted { $0.minX < $1.minX }
+        if sorted.count > 1 {
+            for index in 0..<(sorted.count - 1) {
+                let gapX = sorted[index].maxX
+                let gapWidth = sorted[index + 1].minX - gapX
+                guard gapWidth >= size.width + 8 else { continue }
+                let x = gapX + (gapWidth - size.width) / 2
+                candidates.append(NSRect(x: x, y: sorted[index].minY, width: size.width, height: size.height))
+            }
+        }
+        guard let frame = AxisMarkLayout.firstFit(candidates, in: pane, avoiding: labels) else { return nil }
+        return AxisPlacedUnit(text: text, frame: frame)
+    }
+
     private static func droppingOverlaps(_ ticks: [Tick], width: CGFloat) -> [Tick] {
         var lastRight = -CGFloat.greatestFiniteMagnitude
         return ticks.map { tick in
@@ -386,20 +460,57 @@ enum TimeAxisTicks {
     }
 }
 
+struct AxisPlacedUnit: Equatable {
+    var text: String
+    var frame: NSRect
+}
+
+enum AxisMarkLayout {
+    static let gap: CGFloat = 3
+
+    static func firstFit(_ candidates: [NSRect], in area: NSRect, avoiding obstacles: [NSRect]) -> NSRect? {
+        for rect in candidates {
+            guard rect.width > 0, rect.height > 0 else { continue }
+            guard rect.minX >= area.minX - 0.01, rect.maxX <= area.maxX + 0.01,
+                  rect.minY >= area.minY - 0.01, rect.maxY <= area.maxY + 0.01 else { continue }
+            let hits = obstacles.contains { obstacle in
+                obstacle.insetBy(dx: -gap, dy: -gap).intersects(rect)
+            }
+            if hits { continue }
+            return rect
+        }
+        return nil
+    }
+}
+
 enum AxisLabelChrome {
     static let font = NSFont.systemFont(ofSize: 10, weight: .medium)
+    static let unitFont = NSFont.systemFont(ofSize: 9, weight: .regular)
     static let tickLength: CGFloat = 6
+    static let fadePadding: CGFloat = 3
     static let fadeAlphas: [CGFloat] = [0.6, 0.24, 0]
 
-    static func size(of label: String) -> NSSize {
+    static func glyphSize(of label: String) -> NSSize {
         let raw = (label as NSString).size(withAttributes: [.font: font])
-        return NSSize(width: ceil(raw.width) + 6, height: ceil(raw.height) + 2)
+        return NSSize(width: ceil(raw.width), height: ceil(raw.height))
     }
 
-    static func drawTick(from start: NSPoint, to end: NSPoint) {
+    static func size(of label: String) -> NSSize {
+        let raw = glyphSize(of: label)
+        return NSSize(width: raw.width + 6, height: raw.height + 2)
+    }
+
+    static func unitSize(_ text: String) -> NSSize {
+        let raw = (text as NSString).size(withAttributes: [.font: unitFont])
+        return NSSize(width: ceil(raw.width), height: ceil(raw.height))
+    }
+
+    static func drawTick(from start: NSPoint, to end: NSPoint, clip: NSRect? = nil) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
-        ctx.setShadow(offset: .zero, blur: 1.2, color: NSColor.black.withAlphaComponent(0.8).cgColor)
+        if let clip {
+            ctx.clip(to: clip)
+        }
         ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.95).cgColor)
         ctx.setLineWidth(1)
         ctx.setLineCap(.butt)
@@ -409,45 +520,47 @@ enum AxisLabelChrome {
         ctx.restoreGState()
     }
 
-    static func drawLabel(_ label: String, textOrigin: NSPoint, in view: NSView) {
-        let textRect = NSRect(origin: textOrigin, size: size(of: label))
-        drawFade(around: textRect)
+    static func drawLabel(_ label: String, textOrigin: NSPoint, in view: NSView, clip: NSRect? = nil) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        if let clip {
+            ctx.clip(to: clip)
+        }
+        let glyphs = NSRect(origin: textOrigin, size: glyphSize(of: label))
+        drawFade(around: glyphs)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white,
-            .shadow: {
-                let shadow = NSShadow()
-                shadow.shadowOffset = .zero
-                shadow.shadowBlurRadius = 2.5
-                shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
-                return shadow
-            }()
+            .foregroundColor: NSColor.white
         ]
         (label as NSString).draw(at: textOrigin, withAttributes: attributes)
+        ctx.restoreGState()
     }
 
-    private static func drawFade(around textRect: NSRect) {
+    static func drawUnit(_ text: String, frame: NSRect, clip: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let center = CGPoint(x: textRect.midX, y: textRect.midY)
-        let radius = max(textRect.width, textRect.height) * 0.95 + 10
-        let colors = fadeAlphas.map { NSColor.black.withAlphaComponent($0).cgColor } as CFArray
-        let locations: [CGFloat] = [0, 0.42, 1]
-        guard let gradient = locations.withUnsafeBufferPointer({ buffer in
-            CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: colors,
-                locations: buffer.baseAddress
-            )
-        }) else { return }
         ctx.saveGState()
-        ctx.drawRadialGradient(
-            gradient,
-            startCenter: center,
-            startRadius: 1,
-            endCenter: center,
-            endRadius: radius,
-            options: []
-        )
+        ctx.clip(to: clip)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: unitFont,
+            .foregroundColor: NSColor.white.withAlphaComponent(0.72)
+        ]
+        (text as NSString).draw(at: frame.origin, withAttributes: attributes)
+        ctx.restoreGState()
+    }
+
+    private static func drawFade(around glyphs: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let outer = glyphs.insetBy(dx: -fadePadding, dy: -fadePadding)
+        ctx.saveGState()
+        ctx.clip(to: outer)
+        if fadeAlphas.count > 1, fadeAlphas[1] > 0 {
+            NSColor.black.withAlphaComponent(fadeAlphas[1]).setFill()
+            NSBezierPath(roundedRect: outer, xRadius: 2, yRadius: 2).fill()
+        }
+        if let core = fadeAlphas.first, core > 0 {
+            NSColor.black.withAlphaComponent(core).setFill()
+            NSBezierPath(roundedRect: glyphs, xRadius: 1.5, yRadius: 1.5).fill()
+        }
         ctx.restoreGState()
     }
 }
@@ -489,6 +602,11 @@ final class SlipContentView: NSView {
     private var progressFraction = 0.0
     private(set) var isResizeDrag = false
     private var resizeTracking: NSTrackingArea?
+    let hoverPollInterval: TimeInterval = 1.0 / 60.0
+    private var hoverTimer: Timer?
+    private var hoverCursorHeld = false
+    private var previousFront: NSRunningApplication?
+    var hoverPollIsRunning: Bool { hoverTimer?.isValid == true }
 
     override var isFlipped: Bool { true }
 
@@ -701,13 +819,36 @@ final class SlipContentView: NSView {
         return (Double(rgb.redComponent), Double(rgb.greenComponent), Double(rgb.blueComponent))
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        guard window != nil else {
+            endHoverCursor()
+            return
+        }
+        // Finder owns mouse-moved events while it is front, so a tracking area
+        // never hears the pointer. Poll the screen location instead. The panel
+        // stays non-key, and the cursor is set only while the pointer is inside.
+        let timer = Timer(timeInterval: hoverPollInterval, repeats: true) { [weak self] _ in
+            self?.sampleHoverCursor()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hoverTimer = timer
+    }
+
+    deinit {
+        hoverTimer?.invalidate()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let resizeTracking {
             removeTrackingArea(resizeTracking)
         }
-        // Cursor rects only apply while the window is key. This panel cannot
-        // become key, so the tracking area sets the resize cursor itself.
+        // Cursor rects only apply while the window is key, and this panel cannot
+        // become key. The hover poll is what sets the resize cursor while Finder
+        // is the front app.
         let area = NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
@@ -750,7 +891,7 @@ final class SlipContentView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        NSCursor.arrow.set()
+        endHoverCursor()
     }
 
     func resizeCursor(at point: NSPoint) -> NSCursor? {
@@ -763,13 +904,64 @@ final class SlipContentView: NSView {
         return nil
     }
 
-    func updateHoverCursor(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(point), let cursor = resizeCursor(at: point) else {
-            NSCursor.arrow.set()
+    func hoverCursor(at point: NSPoint, panelHit: Bool) -> NSCursor? {
+        guard panelHit, containsPointer(point) else { return nil }
+        return resizeCursor(at: point) ?? .arrow
+    }
+
+    func sampleHoverCursor() {
+        if isResizeDrag || draggingSplit { return }
+        guard let window, window.isVisible else {
+            endHoverCursor()
             return
         }
-        cursor.set()
+        let screen = NSEvent.mouseLocation
+        let frame = window.frame
+        let panelHit = frame.contains(screen)
+            || NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber
+        let local = convert(window.convertPoint(fromScreen: screen), from: nil)
+        applyHoverCursor(hoverCursor(at: local, panelHit: panelHit))
+    }
+
+    func updateHoverCursor(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        applyHoverCursor(hoverCursor(at: point, panelHit: true))
+    }
+
+    private func containsPointer(_ point: NSPoint) -> Bool {
+        point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY
+    }
+
+    private func applyHoverCursor(_ cursor: NSCursor?) {
+        let resize = cursor.flatMap { $0 === NSCursor.arrow ? nil : $0 }
+        guard let resize else {
+            restoreFrontApp()
+            endHoverCursor()
+            return
+        }
+        // Finder owns the cursor while it is front, and it ignores both
+        // NSCursor.set and CGDisplayHideCursor from an inactive app.
+        // Take activation only for the resize zone, then give it back.
+        if previousFront == nil, !NSApp.isActive {
+            previousFront = NSWorkspace.shared.frontmostApplication
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        resize.set()
+        hoverCursorHeld = true
+    }
+
+    private func restoreFrontApp() {
+        guard let previous = previousFront else { return }
+        previousFront = nil
+        if previous.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previous.activate(options: [])
+        }
+    }
+
+    private func endHoverCursor() {
+        guard hoverCursorHeld else { return }
+        hoverCursorHeld = false
+        NSCursor.arrow.set()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -812,6 +1004,10 @@ final class SlipContentView: NSView {
         }
         guard splitHit(local) else {
             super.mouseDown(with: event)
+            return
+        }
+        if event.clickCount >= 2 {
+            resetSplitToDefault()
             return
         }
         draggingSplit = true
@@ -888,6 +1084,13 @@ final class SlipContentView: NSView {
         }
     }
 
+    func resetSplitToDefault() {
+        let fraction = SettingsBlob.factory.splitFraction
+        splitFraction = fraction
+        onSplit(fraction)
+        needsLayout = true
+    }
+
     func applySplitDrag(rawFraction: Double) {
         let clamped = min(max(rawFraction, 0.08), 0.92)
         let fraction = SplitSnap.value(clamped)
@@ -928,6 +1131,8 @@ final class SlipContentView: NSView {
         volumeSlider.trackFillColor = palette.head
         waveformPane.wantsLayer = true
         spectrogramPane.wantsLayer = true
+        spectrogramPane.clipsToBounds = true
+        spectrogramPane.layer?.masksToBounds = true
         divider.wantsLayer = true
         waveformPane.layer?.backgroundColor = palette.pane.cgColor
         spectrogramPane.layer?.backgroundColor = palette.pane.cgColor
@@ -1332,9 +1537,16 @@ final class SlipPaneView: NSView {
 
     private func drawFrequencyAxis() {
         guard showsFrequencyAxis, frequencyNyquist > FrequencyAxisTicks.audibleFloor else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.clip(to: bounds)
+        defer { ctx.restoreGState() }
         let images = spectrogramImages.isEmpty ? 1 : spectrogramImages.count
         let gap: CGFloat = images > 1 ? 3 : 0
         let laneHeight = max(1, (bounds.height - gap * CGFloat(max(images - 1, 0))) / CGFloat(images))
+        var obstacles: [NSRect] = []
+        var topLane = CGRect.zero
+        var topTicks: [FrequencyAxisTicks.Tick] = []
         for index in 0..<images {
             let lane = CGRect(
                 x: 0,
@@ -1342,53 +1554,72 @@ final class SlipPaneView: NSView {
                 width: bounds.width,
                 height: laneHeight
             )
+            if index == 0 {
+                topLane = lane
+                topTicks = FrequencyAxisTicks.layout(height: lane.height, nyquist: frequencyNyquist)
+            }
+            let ticks = FrequencyAxisTicks.layout(height: lane.height, nyquist: frequencyNyquist)
+            obstacles.append(contentsOf: ticks.map { FrequencyAxisTicks.labelFrame(for: $0, in: lane) })
             drawFrequencyLabels(in: lane)
+        }
+        let timeBand: CGFloat = showsTimeAxis && timeDuration > 0 ? 22 : 0
+        if timeBand > 0 {
+            obstacles.append(NSRect(x: 0, y: bounds.maxY - timeBand, width: bounds.width, height: timeBand))
+        }
+        if !topTicks.isEmpty, let unit = FrequencyAxisTicks.placedUnit(ticks: topTicks, in: topLane, avoiding: obstacles) {
+            AxisLabelChrome.drawUnit(unit.text, frame: unit.frame, clip: bounds)
         }
     }
 
     private func drawFrequencyLabels(in lane: CGRect) {
         let ticks = FrequencyAxisTicks.layout(height: lane.height, nyquist: frequencyNyquist)
         guard !ticks.isEmpty else { return }
+        let clip = bounds.intersection(lane)
+        guard clip.width > 0, clip.height > 0 else { return }
         let timeBand: CGFloat = showsTimeAxis && timeDuration > 0 ? 22 : 0
         for tick in ticks {
             let center = lane.minY + tick.centerY
             if timeBand > 0, center > lane.maxY - timeBand {
                 continue
             }
-            let labelSize = AxisLabelChrome.size(of: tick.label)
-            let textOrigin = NSPoint(
-                x: lane.minX + 4 + AxisLabelChrome.tickLength + 3,
-                y: center - labelSize.height / 2
-            )
-            AxisLabelChrome.drawLabel(tick.label, textOrigin: textOrigin, in: self)
+            let frame = FrequencyAxisTicks.labelFrame(for: tick, in: lane)
+            AxisLabelChrome.drawLabel(tick.label, textOrigin: frame.origin, in: self, clip: clip)
             AxisLabelChrome.drawTick(
                 from: NSPoint(x: lane.minX + 2, y: center),
-                to: NSPoint(x: lane.minX + 2 + AxisLabelChrome.tickLength, y: center)
+                to: NSPoint(x: lane.minX + 2 + AxisLabelChrome.tickLength, y: center),
+                clip: clip
             )
         }
     }
 
     private func drawTimeAxis() {
         guard showsTimeAxis, timeDuration > 0 else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        ctx.clip(to: bounds)
+        defer { ctx.restoreGState() }
         let ticks = TimeAxisTicks.layout(width: bounds.width, duration: timeDuration)
         guard !ticks.isEmpty else { return }
         let baseline = bounds.maxY - 2
+        let tickTop = baseline - AxisLabelChrome.tickLength
         for tick in ticks {
-            let tickTop = baseline - AxisLabelChrome.tickLength
-            if !tick.label.isEmpty {
-                let labelSize = AxisLabelChrome.size(of: tick.label)
-                var x = tick.centerX - labelSize.width / 2
-                x = min(max(1, x), max(1, bounds.width - labelSize.width - 1))
-                let y = tickTop - labelSize.height - 1
-                if y >= 0 {
-                    AxisLabelChrome.drawLabel(tick.label, textOrigin: NSPoint(x: x, y: y), in: self)
-                }
+            if let frame = TimeAxisTicks.labelFrame(for: tick, width: bounds.width, tickTop: tickTop) {
+                AxisLabelChrome.drawLabel(tick.label, textOrigin: frame.origin, in: self, clip: bounds)
             }
             AxisLabelChrome.drawTick(
                 from: NSPoint(x: tick.centerX, y: tickTop),
-                to: NSPoint(x: tick.centerX, y: baseline)
+                to: NSPoint(x: tick.centerX, y: baseline),
+                clip: bounds
             )
         }
+        if let unit = TimeAxisTicks.placedUnit(ticks: ticks, duration: timeDuration, pane: bounds, tickTop: tickTop) {
+            AxisLabelChrome.drawUnit(unit.text, frame: unit.frame, clip: bounds)
+        }
+    }
+
+    func drawSpectrogramAxisChromeForTest(label: String, textOrigin: NSPoint, tickStart: NSPoint, tickEnd: NSPoint, clip: NSRect) {
+        AxisLabelChrome.drawLabel(label, textOrigin: textOrigin, in: self, clip: clip)
+        AxisLabelChrome.drawTick(from: tickStart, to: tickEnd, clip: clip)
     }
 
     override func mouseDown(with event: NSEvent) {

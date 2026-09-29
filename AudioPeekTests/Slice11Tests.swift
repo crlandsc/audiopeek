@@ -9,7 +9,7 @@ final class Slice11Tests: XCTestCase {
     func testMetadataStaysClearOfTheControls() {
         let view = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
         view.filenameLabel.stringValue = "tone.wav"
-        view.metadataLabel.stringValue = "WAV · 44.1 kHz · 16 ch · showing 8 · 16 ch · showing 2 · 0:00"
+        view.metadataLabel.stringValue = "WAV · 44.1 kHz · 16 ch · showing 8 · 16 ch · showing 2 · 0:00 / 0:00"
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(view.metadataLabel.frame.maxX, view.volumeSlider.frame.minX + 0.5)
@@ -30,8 +30,8 @@ final class Slice11Tests: XCTestCase {
 
     func testScreenshotMetadataFitsWhileTheFilenameCanTruncate() throws {
         let filename = "Piano Lullabies - Piano Music for Sleeping and Relaxation.mp3"
-        let metadata = "MP3 · 44.1 kHz · 2 ch · 84:22"
-        let wavMetadata = "WAV · 44.1 kHz · 2 ch · 0:10"
+        let metadata = "MP3 · 44.1 kHz · 2 ch · 0:00 / 84:22"
+        let wavMetadata = "WAV · 44.1 kHz · 2 ch · 0:00 / 0:10"
         for (width, line) in [(512.0, metadata), (860.0, metadata), (1024.0, metadata), (860.0, wavMetadata)] {
             let view = SlipContentView(frame: NSRect(x: 0, y: 0, width: width, height: 80))
             view.filenameLabel.stringValue = filename

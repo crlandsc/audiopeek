@@ -239,6 +239,33 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.applySplitDrag(rawFraction: rawFraction)
     }
 
+    @discardableResult
+    func dividerClickForTest(clickCount: Int) -> Bool {
+        if panel == nil {
+            panel = makePanel()
+        }
+        content.layoutSubtreeIfNeeded()
+        let local = NSPoint(x: content.bounds.midX, y: content.divider.frame.midY)
+        let windowPoint = content.convert(local, to: nil)
+        guard let event = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: windowPoint,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: content.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: clickCount,
+            pressure: 1
+        ) else { return false }
+        content.mouseDown(with: event)
+        return true
+    }
+
+    func applyScrubForTest(fraction: Double, phase: ScrubPhase) {
+        content.onScrub("waveform", fraction, phase)
+    }
+
     var overviewFirstMaximum: Double {
         guard let column = overviewSnapshot.lanes.first?.first else { return 0 }
         return Double(column.maximum)
@@ -639,6 +666,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         let fraction = playback.duration > 0 ? playback.position / playback.duration : 0
         content.setPlayhead(fraction: fraction)
         content.setPlaying(playback.isPlaying)
+        refreshMetadata()
     }
 
     private func startGate() {
@@ -987,14 +1015,18 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             channels: info.channels,
             dual: store.blob.spectrogramDual && store.blob.showSpectrogram
         )
-        content.metadataLabel.stringValue = AudioFileKind.metadataLine(
+        let line = AudioFileKind.metadataLine(
             format: AudioFileKind.metadataLabel(for: url),
             sampleRate: info.sampleRate,
             channels: info.channels,
             duration: info.duration,
             waveformShowing: waveformShowing,
-            spectrogramShowing: spectrogramShowing
+            spectrogramShowing: spectrogramShowing,
+            position: playback.position
         )
+        guard content.metadataLabel.stringValue != line else { return }
+        content.metadataLabel.stringValue = line
+        content.metadataLabel.toolTip = line
         content.needsLayout = true
     }
 

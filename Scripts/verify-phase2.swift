@@ -271,13 +271,17 @@ state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true && $0["playbac
 let openedPlaying = state["playbackRunning"]?.bool == true
 Check.expect(state["slipVisible"]?.bool == true, "one audio file opens the panel")
 Check.expect(state["slipFilename"]?.string == "tone.wav", "filename \(state["slipFilename"]?.string ?? "")")
-Check.expect(state["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "metadata \(state["slipMetadata"]?.string ?? "")")
+let openedMetadata = state["slipMetadata"]?.string ?? ""
+Check.expect(
+    openedMetadata.hasPrefix("WAV · 44.1 kHz · 1 ch · ") && openedMetadata.hasSuffix(" / 0:08"),
+    "metadata \(openedMetadata)"
+)
 Check.expect(state["headerOrder"]?.strings == ["play", "filename", "metadata", "volume", "loop", "settings"], "header order \(state["headerOrder"]?.strings ?? [])")
 Check.expect(state["movableByBackground"]?.bool == false, "the window does not drag from the background")
 Check.expect((state["metadataMaxX"]?.double ?? 9999) <= (state["volumeMinX"]?.double ?? 0) + 0.5, "metadata stays left of the volume control")
 Check.expect((state["loopMinX"]?.double ?? 0) + 20 < (state["gearMinX"]?.double ?? 0), "loop sits left of settings")
 Check.expect(state["filenameToolTip"]?.string == "tone.wav", "filename help tag")
-Check.expect(state["metadataToolTip"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "metadata help tag")
+Check.expect(state["metadataToolTip"]?.string == openedMetadata, "metadata help tag")
 Check.expect(state["blob"]?["loopEnabled"]?.bool == false, "loop defaults off")
 state = command("probeHit", extra: ["x": 80, "y": 10])
 Check.expect(state["hitKind"]?.string == "header", "header drag region \(state["hitKind"]?.string ?? "")")
@@ -359,7 +363,11 @@ Check.expect(state["slipVisible"]?.bool == true, "a click outside leaves the pan
 state = command("setFinder", extra: ["mode": "paths", "paths": [wavB.path]])
 let followed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipFilename"]?.string == "other.wav" }
 Check.expect(followed?["slipFilename"]?.string == "other.wav", "the poll follows a new audio file")
-Check.expect(followed?["slipMetadata"]?.string == "WAV · 44.1 kHz · 1 ch · 0:08", "the new file's metadata is \(followed?["slipMetadata"]?.string ?? "")")
+let followedMetadata = followed?["slipMetadata"]?.string ?? ""
+Check.expect(
+    followedMetadata.hasPrefix("WAV · 44.1 kHz · 1 ch · ") && followedMetadata.hasSuffix(" / 0:08"),
+    "the new file's metadata is \(followedMetadata)"
+)
 
 state = command("setFinder", extra: ["mode": "paths", "paths": []])
 let closed = waitUntil(at: stateURL, timeout: 2.5) { $0["slipVisible"]?.bool == false }

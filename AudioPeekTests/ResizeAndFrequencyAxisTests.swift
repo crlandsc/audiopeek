@@ -262,10 +262,20 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         window.acceptsMouseMovedEvents = true
         view.updateTrackingAreas()
         XCTAssertFalse(window.canBecomeKey)
+        XCTAssertFalse(window.canBecomeMain)
         XCTAssertTrue(window.acceptsMouseMovedEvents)
+        XCTAssertTrue(view.hoverPollIsRunning)
+        XCTAssertEqual(view.hoverPollInterval, 1.0 / 60.0, accuracy: 0.001)
         XCTAssertTrue(view.trackingAreas.contains { area in
             area.options.contains(.mouseMoved) && area.options.contains(.activeAlways)
         })
+        for (point, cursor) in checks {
+            XCTAssertTrue(view.hoverCursor(at: point, panelHit: true) === cursor)
+        }
+        XCTAssertTrue(view.hoverCursor(at: split, panelHit: true) === NSCursor.resizeUpDown)
+        XCTAssertTrue(view.hoverCursor(at: NSPoint(x: 430, y: 200), panelHit: true) === NSCursor.arrow)
+        XCTAssertNil(view.hoverCursor(at: NSPoint(x: 3, y: 250), panelHit: false))
+        XCTAssertNil(view.hoverCursor(at: NSPoint(x: -4, y: 250), panelHit: true))
     }
 
     func testFrequencyFormatUsesPlainNumbersAndKilohertz() {
@@ -401,6 +411,192 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         slip.applySplitDragForTest(rawFraction: 0.51)
         XCTAssertEqual(slipStore?.blob.splitFraction ?? -1, SplitSnap.value(0.51), accuracy: 0.0001)
         XCTAssertEqual(slip.splitFraction, slipStore?.blob.splitFraction ?? -1, accuracy: 0.0001)
+    }
+
+    func testDividerDoubleClickResetsTheSplitToHalf() {
+        let slip = makeSlip()
+        slip.applySplitDragForTest(rawFraction: 0.25)
+        XCTAssertEqual(slip.splitFraction, SplitSnap.value(0.25), accuracy: 0.0001)
+        XCTAssertNotEqual(slip.splitFraction, 0.5, accuracy: 0.02)
+        XCTAssertTrue(slip.dividerClickForTest(clickCount: 2))
+        XCTAssertEqual(slip.splitFraction, SettingsBlob.factory.splitFraction, accuracy: 0.0001)
+        XCTAssertEqual(slip.splitFraction, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(slipStore?.blob.splitFraction ?? -1, 0.5, accuracy: 0.0001)
+    }
+
+    func testAxisUnitsAvoidTickLabels() {
+        XCTAssertEqual(FrequencyAxisTicks.unitText, "Hz")
+        XCTAssertEqual(TimeAxisTicks.unitText(duration: 10), "s")
+        XCTAssertEqual(TimeAxisTicks.unitText(duration: 197), "min:sec")
+        XCTAssertEqual(TimeAxisTicks.unitText(duration: 3600), "h:mm:ss")
+        XCTAssertFalse(FrequencyAxisTicks.format(22050).contains("Hz"))
+        XCTAssertFalse(TimeAxisTicks.format(20, step: 1).contains("s"))
+
+        for height in [CGFloat(140), 360] {
+            let ticks = FrequencyAxisTicks.layout(height: height, nyquist: 22_050)
+            var previous = -CGFloat.greatestFiniteMagnitude
+            for tick in ticks {
+                XCTAssertGreaterThanOrEqual(tick.centerY - previous, FrequencyAxisTicks.minSeparation - 0.01, tick.label)
+                previous = tick.centerY
+            }
+            let area = NSRect(x: 0, y: 0, width: 860, height: height)
+            let unit = FrequencyAxisTicks.placedUnit(ticks: ticks, in: area)
+            XCTAssertEqual(unit?.text, "Hz")
+            if let unit {
+                assertUnitClearsLabels(unit.frame, ticks.map { FrequencyAxisTicks.labelFrame(for: $0, in: area) }, area: area)
+            }
+        }
+        XCTAssertNil(FrequencyAxisTicks.placedUnit(
+            ticks: [FrequencyAxisTicks.Tick(hertz: 22_050, centerY: 8, label: "22.1k")],
+            in: NSRect(x: 0, y: 0, width: 4, height: 20)
+        ))
+
+        for width in [CGFloat(280), 860] {
+            let ticks = TimeAxisTicks.layout(width: width, duration: 10)
+            assertTimeLabelsFit(ticks, width: width)
+            let pane = NSRect(x: 0, y: 0, width: width, height: 120)
+            let tickTop = pane.maxY - 2 - AxisLabelChrome.tickLength
+            let unit = TimeAxisTicks.placedUnit(ticks: ticks, duration: 10, pane: pane, tickTop: tickTop)
+            XCTAssertEqual(unit?.text, "s")
+            if let unit {
+                let labels = ticks.compactMap { TimeAxisTicks.labelFrame(for: $0, width: width, tickTop: tickTop) }
+                assertUnitClearsLabels(unit.frame, labels, area: pane)
+            }
+            let longTicks = TimeAxisTicks.layout(width: width, duration: 3600)
+            assertTimeLabelsFit(longTicks, width: width)
+            let longUnit = TimeAxisTicks.placedUnit(ticks: longTicks, duration: 3600, pane: pane, tickTop: tickTop)
+            XCTAssertEqual(longUnit?.text, "h:mm:ss")
+        }
+
+        let crowded = TimeAxisTicks.placedUnit(
+            ticks: [
+                TimeAxisTicks.Tick(seconds: 0, centerX: 12, label: "0:00"),
+                TimeAxisTicks.Tick(seconds: 60, centerX: 28, label: "1:00")
+            ],
+            duration: 90,
+            pane: NSRect(x: 0, y: 0, width: 20, height: 18),
+            tickTop: 16
+        )
+        XCTAssertNil(crowded)
+    }
+
+    func testSpectrogramLabelDrawingIsClippedToThePane() {
+        XCTAssertLessThanOrEqual(AxisLabelChrome.fadePadding, 4)
+        XCTAssertGreaterThan(AxisLabelChrome.fadePadding, 0.5)
+
+        let width = 160
+        let height = 120
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return XCTFail("bitmap")
+        }
+        NSGraphicsContext.saveGraphicsState()
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
+            NSGraphicsContext.restoreGraphicsState()
+            return XCTFail("context")
+        }
+        NSGraphicsContext.current = context
+        let fill = NSColor(srgbRed: 1, green: 0.45, blue: 0.05, alpha: 1)
+        fill.setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        let pane = SlipPaneView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        let clip = NSRect(x: 0, y: 24, width: CGFloat(width), height: CGFloat(height - 24))
+        let origin = NSPoint(x: 28, y: 20)
+        pane.drawSpectrogramAxisChromeForTest(
+            label: "22.1k",
+            textOrigin: origin,
+            tickStart: NSPoint(x: 8, y: 32),
+            tickEnd: NSPoint(x: 8, y: 10),
+            clip: clip
+        )
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        func sample(_ x: Int, _ y: Int) -> NSColor? {
+            rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+        }
+        guard let crossed = sample(40, 18), let tickCross = sample(8, 14), let corner = sample(width - 2, 2) else {
+            return XCTFail("pixels")
+        }
+        XCTAssertGreaterThan(crossed.redComponent, 0.9, "22.1k fade crossed the pane edge")
+        XCTAssertGreaterThan(tickCross.redComponent, 0.9, "tick crossed the pane edge")
+        XCTAssertGreaterThan(corner.redComponent, 0.9)
+
+        let glyphs = NSRect(origin: origin, size: AxisLabelChrome.glyphSize(of: "22.1k"))
+        var painted = 0
+        var outside = 0
+        var minX = width
+        var minY = height
+        var maxX = 0
+        var maxY = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                guard let color = sample(x, y) else { continue }
+                let redDrop = corner.redComponent - color.redComponent
+                guard redDrop > 0.08 else { continue }
+                painted += 1
+                if CGFloat(y) < clip.minY - 1 || CGFloat(x) < clip.minX - 1 || CGFloat(y) > clip.maxY + 1 {
+                    outside += 1
+                }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        XCTAssertGreaterThan(painted, 8)
+        XCTAssertEqual(outside, 0)
+        let bounds = NSRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        XCTAssertLessThanOrEqual(bounds.width, glyphs.width + AxisLabelChrome.fadePadding * 2 + 8)
+        XCTAssertLessThanOrEqual(bounds.height, glyphs.height + AxisLabelChrome.fadePadding * 2 + 8)
+    }
+
+    func testPlayheadTimeTextUpdatesWhenPositionChanges() throws {
+        XCTAssertEqual(
+            AudioFileKind.metadataLine(format: "WAV", sampleRate: 44_100, channels: 1, duration: 197, position: 20),
+            "WAV · 44.1 kHz · 1 ch · 0:20 / 3:17"
+        )
+        XCTAssertEqual(
+            AudioFileKind.metadataLine(format: "WAV", sampleRate: 44_100, channels: 1, duration: 197, position: 0),
+            "WAV · 44.1 kHz · 1 ch · 0:00 / 3:17"
+        )
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-clock-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 44_100 * 10)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let slip = makeSlip()
+        slip.setInjectedLoad(thermal: "nominal", cpu: 0.1, applyNow: false)
+        slip.setOverviewStall(true)
+        let read = try XCTUnwrap(PlaybackController.readFile(at: url))
+        slip.stageOpenForTest(url: url, generation: 1, panelUp: true)
+        slip.deliverOpenForTest(url: url, generation: 1, read: read)
+        XCTAssertTrue(slip.metadata.contains("0:00 / 0:10"), slip.metadata)
+
+        slip.applyScrubForTest(fraction: 0.2, phase: .began)
+        XCTAssertTrue(slip.metadata.contains("0:02 / 0:10"), slip.metadata)
+        slip.applyScrubForTest(fraction: 0.45, phase: .moved)
+        XCTAssertTrue(slip.metadata.contains("0:04 / 0:10"), slip.metadata)
+        slip.applyScrubForTest(fraction: 0.2, phase: .ended)
+    }
+
+    private func assertUnitClearsLabels(_ unit: NSRect, _ labels: [NSRect], area: NSRect) {
+        XCTAssertGreaterThanOrEqual(unit.minX, area.minX - 0.01)
+        XCTAssertLessThanOrEqual(unit.maxX, area.maxX + 0.01)
+        XCTAssertGreaterThanOrEqual(unit.minY, area.minY - 0.01)
+        XCTAssertLessThanOrEqual(unit.maxY, area.maxY + 0.01)
+        for label in labels {
+            XCTAssertFalse(label.insetBy(dx: -AxisMarkLayout.gap, dy: -AxisMarkLayout.gap).intersects(unit))
+        }
     }
 
     func testPlayingSeekDoesNotStopTheEngineBeforeScheduling() throws {
