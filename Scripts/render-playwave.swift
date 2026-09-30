@@ -22,17 +22,23 @@ enum RenderPlaywave {
         ]
 
         for (name, side) in slots {
-            let image = PlaywaveMark.iconImage(side: side)
-            let url = catalog.appendingPathComponent(name)
-            guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
-                fputs("Could not write \(url.path)\n", stderr)
-                exit(1)
-            }
-            CGImageDestinationAddImage(dest, image, nil)
-            guard CGImageDestinationFinalize(dest) else {
-                fputs("Could not write \(url.path)\n", stderr)
-                exit(1)
-            }
+            write(PlaywaveMark.iconImage(side: side), to: catalog.appendingPathComponent(name))
+        }
+        if CommandLine.arguments.count > 2 {
+            let readme = URL(fileURLWithPath: CommandLine.arguments[2])
+            write(PlaywaveMark.readmeImage(side: 1024), to: readme)
+        }
+    }
+
+    private static func write(_ image: CGImage, to url: URL) {
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            fputs("Could not write \(url.path)\n", stderr)
+            exit(1)
+        }
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else {
+            fputs("Could not write \(url.path)\n", stderr)
+            exit(1)
         }
     }
 }

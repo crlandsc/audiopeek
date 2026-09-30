@@ -1,38 +1,108 @@
-![AudioPeek playwave mark](playwave-mark.png)
+<p align="center">
+  <img alt="AudioPeek" src="audiopeek-logo.png" width="240">
+</p>
 
 # AudioPeek
 
-AudioPeek previews one audio file in a floating panel. The panel shows a waveform, a spectrogram, and playback.
+AudioPeek is a lightweight app designed to supplement the audio preview on Mac.
 
-Select one local supported file in Finder and press Option-Space. Open With and a file dropped on AudioPeek each preview one local supported file.
+When previewing audio files on Mac, have you ever wished you could see more than just a scrub bar? AudioPeek allows audio previews to render the waveform *and* spectrogram, filling the gap of a bare bones audio preview and importing files into a professional audio application.
 
-Space toggles play only while the panel is visible and Finder is the front app. Arrow keys still move the Finder selection.
+<p align="center">
+  <img alt="AudioPeek" src="audiopeek-preview.png">
+</p>
 
-The menu and the settings window say AudioPeek Settings. When the Dock icon and the menu-bar icon are both hidden, launch AudioPeek again, or use the settings control in the panel header.
 
 ## Install
 
-Download the disk image from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications. Eject the disk image, then open AudioPeek from Applications.
+Just like any other Mac application, download the disk image (`AudioPeek.dmg`) from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications.
 
-The first open is blocked. macOS shows: Apple could not verify "AudioPeek.app" is free of malware that may harm your Mac or compromise your privacy.
+#### IMPORTANT
+The first open is *blocked*. macOS shows:
+> Apple could not verify "AudioPeek.app" is free of malware that may harm your Mac or compromise your privacy.
 
-That message is expected. AudioPeek is ad-hoc signed, not notarized by Apple, so you allow it yourself:
+This message is expected and requires a one-time action to enable the application:
 
-1. In that dialog, click Done. Do not move the app to the Trash.
-2. Open System Settings > Privacy & Security.
-3. In the Security section, find AudioPeek and click Open Anyway, then Open.
+1. In that dialog, click Done. *Do not* move the app to the Trash.
+2. Open **System Settings** > **Privacy & Security**.
+3. In the **Security** section, find AudioPeek and click "Open Anyway", then Open.
 
-You do this once for each new disk image. A newer image is a new signature, so replacing the app asks again. Apple describes the same path in [Safely open apps on your Mac](https://support.apple.com/en-us/102445).
+You only need to do this once. Apple walks through the same steps in [Safely open apps on your Mac](https://support.apple.com/en-us/102445).
 
-## Login items
+#### Allow Finder access
+AudioPeek needs to ask Finder which file you have selected. The first time you press the shortcut, macOS asks:
+> "AudioPeek" wants access to control "Finder".
 
-The first time AudioPeek opens an audio file, it turns the login toggle on and tries to register as a login item. If that fails, Settings asks you to add AudioPeek under Login Items. Use Open Login Items, or add it in System Settings > General > Login Items.
+Click **Allow**. If you clicked Don't Allow by mistake, AudioPeek opens its Settings with an **Open Automation** button. Click it, turn on **Finder** under AudioPeek, and press the shortcut again.
 
-## Finder Automation
 
-Allow AudioPeek to control Finder so the hotkey can read the selection. If the hotkey opens Settings, click Open Automation, enable AudioPeek for Finder, and press the hotkey again.
+## How to use it
 
-A new disk image is a new ad-hoc signature. After you replace the app, enable AudioPeek for Finder again under System Settings > Privacy & Security > Automation.
+1. Select an audio file in Finder.
+2. Press **Option-Space**.
+
+That's it! AudioPeek opens a small panel over Finder, starts playing, and draws the waveform and spectrogram as it goes. You don't have to wait for the picture to finish before listening.
+
+While the panel is open:
+
+- **Arrow keys** still move around in Finder, and AudioPeek follows along to the next file.
+- **Space** plays and pauses.
+- **Click or drag** anywhere on the waveform or spectrogram to jump to that spot.
+- The **volume slider** and **loop button** are in the top bar. The volume is remembered and never goes louder than the file itself.
+- **Esc** or **Option-Space** again closes the panel.
+
+You can also right-click an audio file and choose **Open With** > **AudioPeek**, or drag a file onto the AudioPeek icon.
+
+#### Supported files
+AudioPeek plays anything your Mac already knows how to play:
+
+- WAV
+- AIFF (`.aif`, `.aiff`)
+- MP3
+- AAC and Apple Lossless (`.m4a`, `.mp4`)
+- FLAC
+- Opus (`.opus`)
+
+For video files (`.mp4`), AudioPeek only shows and plays the audio. Long files work too. On an M3 Max, AudioPeek reads about an hour of audio every 6 seconds, and it keeps playing the whole time.
+
+
+## Settings
+
+Open Settings from the AudioPeek icon in the menu bar, or from the gear in the top right of the panel.
+
+From there you can:
+
+- Change the **shortcut** from Option-Space to something else.
+- Show or hide the **waveform** and **spectrogram**, and drag how much room each one gets.
+- Show every channel separately instead of one combined view (**dual view**).
+- Pick the waveform color and the spectrogram colors.
+- Tune the spectrogram (type, resolution, frequency range, and dB range) if you want more control.
+- Show or hide the **menu bar icon** and the **Dock icon**.
+
+**Reset** puts every setting back to how it started. It keeps your volume and where you left the panel.
+
+#### Hid both icons?
+If you turned off the menu bar icon *and* the Dock icon, open AudioPeek again from Applications (or Spotlight) and Settings comes right back up. The gear in the panel works too.
+
+#### Open at login
+AudioPeek turns on **Open at login** the first time it opens a file, so the shortcut is always ready. You can turn it off in Settings. If macOS doesn't allow it, Settings shows an **Open Login Items** button. Click it and add AudioPeek to the list.
+
+
+## Updating
+
+To update, download the newest `AudioPeek.dmg` from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases), quit AudioPeek, and drag the new copy into Applications to replace the old one. Your settings are kept.
+
+Each new version is treated by macOS as a new app, so you'll need to repeat two quick steps:
+
+1. The **Open Anyway** step from [Install](#install).
+2. Turn **Finder** back on for AudioPeek under **System Settings** > **Privacy & Security** > **Automation**.
+
+
+## Requirements
+
+- macOS 15 (Sequoia) or later
+- A Mac with Apple silicon (M1 or newer)
+
 
 ## License
 

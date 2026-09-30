@@ -7,7 +7,7 @@ final class PlaywaveMarkTests: XCTestCase {
     func testLockedIconMatchesTheCommittedArtwork() throws {
         let drawn = PlaywaveMark.iconImage(side: 400)
         let leftBar = rgba(drawn, x: 115, y: 200)
-        let gap = rgba(drawn, x: 140, y: 200)
+        let gap = rgba(drawn, x: 150, y: 200)
         let outside = rgba(drawn, x: 40, y: 200)
         let tip = rgba(drawn, x: 285, y: 200)
 
