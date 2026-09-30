@@ -41,7 +41,7 @@ Click **Allow**. If you clicked Don't Allow by mistake, AudioPeek opens its Sett
 1. Select an audio file in Finder.
 2. Press **Option-Space**.
 
-That's it! AudioPeek opens a small panel over Finder, starts playing, and draws the waveform and spectrogram as it goes. You don't have to wait for the picture to finish before listening.
+That's it! AudioPeek opens a small panel over Finder, starts playing, and draws the waveform and spectrogram as it goes.
 
 While the panel is open:
 
