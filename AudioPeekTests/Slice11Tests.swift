@@ -1,5 +1,4 @@
 import AppKit
-import AudioToolbox
 import AVFoundation
 import XCTest
 @testable import AudioPeek
@@ -233,35 +232,6 @@ final class Slice11Tests: XCTestCase {
         XCTAssertFalse(playback.isPlaying)
         XCTAssertEqual(playback.position, info.duration, accuracy: 0.05)
         playback.stop()
-
-        let real = URL(fileURLWithPath: "/Users/chris/Music/dad_mode_intro_test.wav")
-        guard FileManager.default.fileExists(atPath: real.path) else { return }
-        let file = try AVAudioFile(forReading: real)
-        var audioFile: ExtAudioFileRef?
-        XCTAssertEqual(ExtAudioFileOpenURL(real as CFURL, &audioFile), noErr)
-        defer { if let audioFile { ExtAudioFileDispose(audioFile) } }
-        var extFrames = Int64(0)
-        var size = UInt32(MemoryLayout<Int64>.size)
-        if let audioFile {
-            ExtAudioFileGetProperty(audioFile, kExtAudioFileProperty_FileLengthFrames, &size, &extFrames)
-        }
-        print("REAL av=\(file.length) ext=\(extFrames) rate=\(file.processingFormat.sampleRate)")
-        XCTAssertEqual(extFrames, file.length)
-        let realPlayback = PlaybackController()
-        realPlayback.setGain(0)
-        XCTAssertNotNil(realPlayback.open(url: real))
-        let realStart = Date()
-        realPlayback.toggle()
-        var furthest = 0.0
-        while Date().timeIntervalSince(realStart) < 13 {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            realPlayback.refreshPosition()
-            furthest = max(furthest, realPlayback.position)
-            if !realPlayback.isPlaying, Date().timeIntervalSince(realStart) > 0.5 { break }
-        }
-        XCTAssertEqual(realPlayback.position, realPlayback.duration, accuracy: 0.05, realPlayback.clockDescription)
-        XCTAssertGreaterThan(furthest, realPlayback.duration * 0.98)
-        realPlayback.stop()
     }
 
     func testPlayheadDoesNotJumpAfterASeekAndAPause() throws {
@@ -511,8 +481,17 @@ final class Slice11Tests: XCTestCase {
         cell.isBordered = false
         cell.draw(withFrame: NSRect(x: 0, y: 0, width: width, height: height), in: field)
         NSGraphicsContext.restoreGraphicsState()
-        let url = URL(fileURLWithPath: "/Users/chris/Desktop/Code/audiopeek/build/\(name).png")
-        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audiopeek-\(name)-\(UUID().uuidString).png")
+        try png.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let written = try Data(contentsOf: url)
+        XCTAssertEqual(
+            written.prefix(8),
+            Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+            "metadata render did not write a PNG"
+        )
     }
 
     private func writeWav(to url: URL, frames: Int) throws {
