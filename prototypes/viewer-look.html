@@ -394,7 +394,7 @@
     <div class="stage" id="stage">
       <div class="finder-win">
         <div class="finder-title">Music</div>
-        <div class="finder-files">SLOW DANCING IN THE DARK_15s.wav &nbsp; selected</div>
+        <div class="finder-files">example.wav &nbsp; selected</div>
       </div>
 
       <div class="overlay chrome-slip cursor-hairline" id="overlay">
@@ -790,7 +790,7 @@
 
     spec.onload = () => { drawWave(); setPlayhead(); };
     if (!window.PROTO) {
-      document.body.insertAdjacentHTML("afterbegin", "<p style='padding:20px'>Missing viewer-look-data.js. Run prototypes/build_viewer_look.py first.</p>");
+      document.body.insertAdjacentHTML("afterbegin", "<p style='padding:20px'>Missing viewer-look-data.js. Run prototypes/build_viewer_look.py PATH.wav first.</p>");
     } else {
       applyAll();
       requestAnimationFrame(() => { drawWave(); setPlayhead(); });

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PROTOTYPE: bake waveform envelopes + mel spectrograms for viewer-look.html.
 
-Reads Chris's named WAV as data. Does not play anything.
+Pass the WAV path as the only argument. The script reads that file as data
+and does not play it. The WAV stays outside the repo.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -18,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import soundfile as sf
 
-SRC = Path("/Users/chris/Music/SLOW DANCING IN THE DARK_15s.wav")
 OUT = Path(__file__).resolve().parent / "viewer-look-data.js"
 
 N_FFT = 2048
@@ -87,7 +88,11 @@ def spec_png(s_db: np.ndarray, cmap: str) -> str:
 
 
 def main() -> None:
-    y, sr = sf.read(str(SRC), always_2d=True, dtype="float64")
+    if len(sys.argv) != 2:
+        print("usage: build_viewer_look.py PATH.wav", file=sys.stderr)
+        raise SystemExit(2)
+    src = Path(sys.argv[1])
+    y, sr = sf.read(str(src), always_2d=True, dtype="float64")
     n_ch = y.shape[1]
     n = y.shape[0]
     duration = n / sr
@@ -107,7 +112,7 @@ def main() -> None:
         waves[name] = {"mn": mn, "mx": mx}
 
     payload = {
-        "file": SRC.name,
+        "file": src.name,
         "format": "WAV",
         "sr": int(sr),
         "channels": int(n_ch),
