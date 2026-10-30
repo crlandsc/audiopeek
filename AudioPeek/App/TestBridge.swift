@@ -275,6 +275,10 @@ final class TestBridge: NSObject {
             } else {
                 slip.setHoverOverride(nil)
             }
+        case "setSettingsAdvanced":
+            if let name = userInfo["pane"] as? String, let pane = SettingsPane(rawValue: name) {
+                settings.setAdvanced(pane, expanded: bool("expanded", in: userInfo) ?? true)
+            }
         case "selectSettingsPane":
             if let name = userInfo["pane"] as? String, let pane = SettingsPane(rawValue: name) {
                 settings.select(pane)

@@ -249,7 +249,7 @@ Sources: [Define the version 1 settings, presets, and viewer interactions](https
 
 One settings blob in the UI (UserDefaults or equivalent). No config file. No named presets. No backup store.
 
-Reset All Settings (General, inside the collapsed Advanced section) immediately replaces the settings-window knobs with the factory set, including Option-Space, the login item, icon visibility, split 50/50, and the system-blue waveform. There is no undo. The Waveform and Spectrogram tabs each have their own reset (Reset Waveform Settings, Reset Spectrogram Settings) that restores only that tab's settings, including the Spectrogram tab's collapsed Advanced analysis values. Reset does not change the volume slider or the remembered window frame. If the blob does not decode, use factory defaults and continue.
+Reset All Settings (General, inside the collapsed Advanced section) immediately replaces the settings-window knobs with the factory set, including Option-Space, the login item, icon visibility, split 50/50, and the system-blue waveform. There is no undo. Every tab ends with a collapsed Advanced section; the Waveform and Spectrogram tabs' Advanced sections hold their own reset (Reset Waveform Settings, Reset Spectrogram Settings) that restores only that tab's settings, including the Spectrogram analysis values. Opening or closing Advanced resizes the window with the same animation as switching tabs. Reset does not change the volume slider or the remembered window frame. If the blob does not decode, use factory defaults and continue.
 
 The window is small, in the spirit of Rectangle, DockDoor, and Hidden Bar. It holds:
 

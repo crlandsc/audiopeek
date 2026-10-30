@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 extension SettingsStore {
@@ -38,6 +39,37 @@ enum SettingsPane: String, CaseIterable {
     }
 }
 
+/// Which panes have their Advanced section open. Every pane's Advanced starts collapsed.
+/// Opening or closing animates the rows; the window follows with the same timing.
+@MainActor
+final class SettingsSectionState: ObservableObject {
+    @Published private(set) var expanded: Set<SettingsPane> = []
+
+    func isExpanded(_ pane: SettingsPane) -> Bool {
+        expanded.contains(pane)
+    }
+
+    func setExpanded(_ pane: SettingsPane, _ open: Bool, animated: Bool = true) {
+        guard isExpanded(pane) != open else { return }
+        let change = {
+            if open {
+                self.expanded.insert(pane)
+            } else {
+                self.expanded.remove(pane)
+            }
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: SettingsWindowController.resizeDuration)) { change() }
+        } else {
+            change()
+        }
+    }
+
+    func binding(_ pane: SettingsPane) -> Binding<Bool> {
+        Binding(get: { self.isExpanded(pane) }, set: { self.setExpanded(pane, $0) })
+    }
+}
+
 struct SettingsActions {
     var onLoginToggle: (Bool) -> Void
     var onOpenLoginItems: () -> Void
@@ -49,6 +81,7 @@ struct SettingsActions {
 struct SettingsPaneView: View {
     let pane: SettingsPane
     @ObservedObject var store: SettingsStore
+    @ObservedObject var sections: SettingsSectionState
     let actions: SettingsActions
     var onHeight: (CGFloat) -> Void = { _ in }
 
@@ -56,11 +89,11 @@ struct SettingsPaneView: View {
         Group {
             switch pane {
             case .general:
-                GeneralPane(store: store, actions: actions)
+                GeneralPane(store: store, sections: sections, actions: actions)
             case .waveform:
-                WaveformPane(store: store)
+                WaveformPane(store: store, sections: sections)
             case .spectrogram:
-                SpectrogramPane(store: store)
+                SpectrogramPane(store: store, sections: sections)
             }
         }
         .formStyle(.grouped)
@@ -86,11 +119,10 @@ private struct PaneHeightKey: PreferenceKey {
     }
 }
 
-struct GeneralPane: View {
+private struct GeneralPane: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var sections: SettingsSectionState
     let actions: SettingsActions
-    /// Advanced starts collapsed; most people never need it.
-    @State var advancedExpanded = false
 
     var body: some View {
         Form {
@@ -151,7 +183,7 @@ struct GeneralPane: View {
                 Text("Waveform on top, spectrogram below. The middle is 50/50.")
             }
 
-            Section(isExpanded: $advancedExpanded) {
+            Section(isExpanded: sections.binding(.general)) {
                 Toggle(isOn: store.binding(\.staticOverview)) {
                     Text("Full detail")
                     Text("Reads every sample for the waveform and spectrogram. Leave it off and files longer than 30 seconds use a coarser picture.")
@@ -172,6 +204,7 @@ struct GeneralPane: View {
 
 private struct WaveformPane: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var sections: SettingsSectionState
 
     var body: some View {
         Form {
@@ -201,23 +234,24 @@ private struct WaveformPane: View {
                 }
             }
 
-            Section {
+            Section(isExpanded: sections.binding(.waveform)) {
                 ResetRow(
                     title: "Reset Waveform Settings",
-                    detail: "Restores only the settings on this tab.",
+                    detail: "Resets only the settings on this tab.",
                     identifier: "settings.resetWaveform"
                 ) {
                     store.resetWaveformSettings()
                 }
+            } header: {
+                Text("Advanced")
             }
         }
     }
 }
 
-struct SpectrogramPane: View {
+private struct SpectrogramPane: View {
     @ObservedObject var store: SettingsStore
-    /// Advanced starts collapsed; most people never need it.
-    @State var advancedExpanded = false
+    @ObservedObject var sections: SettingsSectionState
 
     var body: some View {
         Form {
@@ -244,7 +278,7 @@ struct SpectrogramPane: View {
                 Text("Frequencies along the left of the spectrogram, from 20 up to Nyquist. Time runs along the bottom of the preview. Both start off.")
             }
 
-            Section(isExpanded: $advancedExpanded) {
+            Section(isExpanded: sections.binding(.spectrogram)) {
                 IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT), range: 64...32768, doubles: true)
                 IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop), range: 16...8192, doubles: true)
                 Picker("Window", selection: store.binding(\.spectrogram.window)) {
@@ -263,18 +297,15 @@ struct SpectrogramPane: View {
                 Toggle("dB", isOn: store.binding(\.spectrogram.decibelsEnabled))
                 DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor), range: -200...0, step: 5)
                 DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange), range: 10...200, step: 5)
-            } header: {
-                Text("Advanced")
-            }
-
-            Section {
                 ResetRow(
                     title: "Reset Spectrogram Settings",
-                    detail: "Restores only the settings on this tab, including Advanced.",
+                    detail: "Resets only the settings on this tab.",
                     identifier: "settings.resetSpectrogram"
                 ) {
                     store.resetSpectrogramSettings()
                 }
+            } header: {
+                Text("Advanced")
             }
         }
     }

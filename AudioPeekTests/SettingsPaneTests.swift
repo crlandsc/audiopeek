@@ -95,6 +95,27 @@ final class SettingsPaneTests: XCTestCase {
         NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
     }
 
+    func testEveryTabHasACollapsedAdvancedSectionThatGrowsTheWindow() {
+        let (controller, _) = makeController()
+        for pane in SettingsPane.allCases {
+            XCTAssertFalse(controller.sections.isExpanded(pane), "\(pane) Advanced starts collapsed")
+        }
+        for pane in SettingsPane.allCases {
+            controller.select(pane, animate: false)
+            settle()
+            let collapsed = controller.frame.height
+            let top = controller.frame.maxY
+            controller.setAdvanced(pane, expanded: true)
+            settle()
+            XCTAssertGreaterThan(controller.frame.height, collapsed + 20, "\(pane) Advanced opens")
+            XCTAssertEqual(controller.frame.maxY, top, accuracy: 1, "\(pane) keeps its top edge")
+            controller.setAdvanced(pane, expanded: false)
+            settle()
+            XCTAssertEqual(controller.frame.height, collapsed, accuracy: 1, "\(pane) Advanced closes")
+        }
+        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+    }
+
     func testEachTabResetsOnlyItsOwnSettings() {
         let (_, store) = makeController()
         store.update {
