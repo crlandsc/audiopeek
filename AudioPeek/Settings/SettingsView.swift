@@ -40,33 +40,77 @@ enum SettingsPane: String, CaseIterable {
 }
 
 /// Which panes have their Advanced section open. Every pane's Advanced starts collapsed.
-/// Opening or closing animates the rows; the window follows with the same timing.
+/// Opening adds the rows at once and the growing window reveals them, like switching panes.
+/// Closing turns the arrow at once, lets the window close over the rows, then removes them,
+/// so nothing above the section ever moves.
 @MainActor
 final class SettingsSectionState: ObservableObject {
+    /// The disclosure arrow.
     @Published private(set) var expanded: Set<SettingsPane> = []
+    /// The section's rows.
+    @Published private(set) var shown: Set<SettingsPane> = []
+    /// Set by the window: shrink over the rows, then call the completion.
+    var closeOver: (SettingsPane, @escaping () -> Void) -> Void = { _, done in done() }
+    /// Set by the window: a section reopened before its rows were removed.
+    var reopen: (SettingsPane) -> Void = { _ in }
 
     func isExpanded(_ pane: SettingsPane) -> Bool {
         expanded.contains(pane)
     }
 
-    func setExpanded(_ pane: SettingsPane, _ open: Bool, animated: Bool = true) {
+    func isShown(_ pane: SettingsPane) -> Bool {
+        shown.contains(pane)
+    }
+
+    func setExpanded(_ pane: SettingsPane, _ open: Bool) {
         guard isExpanded(pane) != open else { return }
-        let change = {
-            if open {
-                self.expanded.insert(pane)
+        if open {
+            expanded.insert(pane)
+            if shown.contains(pane) {
+                reopen(pane)
             } else {
-                self.expanded.remove(pane)
+                shown.insert(pane)
             }
-        }
-        if animated {
-            withAnimation(.easeInOut(duration: SettingsWindowController.resizeDuration)) { change() }
         } else {
-            change()
+            expanded.remove(pane)
+            closeOver(pane) { [weak self] in
+                guard let self, !self.isExpanded(pane) else { return }
+                self.shown.remove(pane)
+            }
         }
     }
 
-    func binding(_ pane: SettingsPane) -> Binding<Bool> {
-        Binding(get: { self.isExpanded(pane) }, set: { self.setExpanded(pane, $0) })
+    func toggle(_ pane: SettingsPane) {
+        setExpanded(pane, !isExpanded(pane))
+    }
+}
+
+/// The "Advanced" section header with a disclosure arrow, like a system collapsible section.
+private struct AdvancedHeader: View {
+    let pane: SettingsPane
+    @ObservedObject var sections: SettingsSectionState
+
+    var body: some View {
+        Button {
+            sections.toggle(pane)
+        } label: {
+            // The title lines up with the other section titles; the arrow hangs in the margin.
+            Text("Advanced")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(sections.isExpanded(pane) ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: sections.isExpanded(pane))
+                        .offset(x: -13)
+                }
+                .padding(.leading, 16)
+                .contentShape(Rectangle())
+                .padding(.leading, -16)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(sections.isExpanded(pane) ? "Hide Advanced" : "Show Advanced")
     }
 }
 
@@ -109,6 +153,9 @@ struct SettingsPaneView: View {
         .onPreferenceChange(PaneHeightKey.self) { height in
             onHeight(height)
         }
+        // Anchor to the top: while the window or a section animates, everything above the
+        // change stays put and only what is below it opens or closes.
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -183,20 +230,22 @@ private struct GeneralPane: View {
                 Text("Waveform on top, spectrogram below. The middle is 50/50.")
             }
 
-            Section(isExpanded: sections.binding(.general)) {
-                Toggle(isOn: store.binding(\.staticOverview)) {
-                    Text("Full detail")
-                    Text("Reads every sample for the waveform and spectrogram. Leave it off and files longer than 30 seconds use a coarser picture.")
-                }
-                ResetRow(
-                    title: "Reset All Settings",
-                    detail: "Restores every setting on the General, Waveform and Spectrogram tabs to its default, including the hotkey and the login item. The volume and the preview's size and position stay as they are.",
-                    identifier: "settings.reset"
-                ) {
-                    actions.onReset()
+            Section {
+                if sections.isShown(.general) {
+                    Toggle(isOn: store.binding(\.staticOverview)) {
+                        Text("Full detail")
+                        Text("Reads every sample for the waveform and spectrogram. Leave it off and files longer than 30 seconds use a coarser picture.")
+                    }
+                    ResetRow(
+                        title: "Reset All Settings",
+                        detail: "Restores every setting on the General, Waveform and Spectrogram tabs to its default, including the hotkey and the login item. The volume and the preview's size and position stay as they are.",
+                        identifier: "settings.reset"
+                    ) {
+                        actions.onReset()
+                    }
                 }
             } header: {
-                Text("Advanced")
+                AdvancedHeader(pane: .general, sections: sections)
             }
         }
     }
@@ -234,16 +283,18 @@ private struct WaveformPane: View {
                 }
             }
 
-            Section(isExpanded: sections.binding(.waveform)) {
-                ResetRow(
-                    title: "Reset Waveform Settings",
-                    detail: "Resets only the settings on this tab.",
-                    identifier: "settings.resetWaveform"
-                ) {
-                    store.resetWaveformSettings()
+            Section {
+                if sections.isShown(.waveform) {
+                    ResetRow(
+                        title: "Reset Waveform Settings",
+                        detail: "Resets only the settings on this tab.",
+                        identifier: "settings.resetWaveform"
+                    ) {
+                        store.resetWaveformSettings()
+                    }
                 }
             } header: {
-                Text("Advanced")
+                AdvancedHeader(pane: .waveform, sections: sections)
             }
         }
     }
@@ -278,34 +329,36 @@ private struct SpectrogramPane: View {
                 Text("Frequencies along the left of the spectrogram, from 20 up to Nyquist. Time runs along the bottom of the preview. Both start off.")
             }
 
-            Section(isExpanded: sections.binding(.spectrogram)) {
-                IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT), range: 64...32768, doubles: true)
-                IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop), range: 16...8192, doubles: true)
-                Picker("Window", selection: store.binding(\.spectrogram.window)) {
-                    Text("Hann").tag(FFTWindow.hann)
-                    Text("Hamming").tag(FFTWindow.hamming)
-                    Text("Blackman").tag(FFTWindow.blackman)
-                }
-                IntegerField(title: "n_mels", value: store.binding(\.spectrogram.nMels), range: 8...512, step: 8)
-                DoubleField(title: "fmin", value: store.binding(\.spectrogram.fmin), range: 0...20000, step: 10)
-                HertzField(
-                    title: "fmax",
-                    caption: "Blank uses the file's Nyquist.",
-                    placeholder: "Nyquist",
-                    value: store.blob.spectrogram.fmax
-                ) { store.setFMax($0) }
-                Toggle("dB", isOn: store.binding(\.spectrogram.decibelsEnabled))
-                DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor), range: -200...0, step: 5)
-                DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange), range: 10...200, step: 5)
-                ResetRow(
-                    title: "Reset Spectrogram Settings",
-                    detail: "Resets only the settings on this tab.",
-                    identifier: "settings.resetSpectrogram"
-                ) {
-                    store.resetSpectrogramSettings()
+            Section {
+                if sections.isShown(.spectrogram) {
+                    IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT), range: 64...32768, doubles: true)
+                    IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop), range: 16...8192, doubles: true)
+                    Picker("Window", selection: store.binding(\.spectrogram.window)) {
+                        Text("Hann").tag(FFTWindow.hann)
+                        Text("Hamming").tag(FFTWindow.hamming)
+                        Text("Blackman").tag(FFTWindow.blackman)
+                    }
+                    IntegerField(title: "n_mels", value: store.binding(\.spectrogram.nMels), range: 8...512, step: 8)
+                    DoubleField(title: "fmin", value: store.binding(\.spectrogram.fmin), range: 0...20000, step: 10)
+                    HertzField(
+                        title: "fmax",
+                        caption: "Blank uses the file's Nyquist.",
+                        placeholder: "Nyquist",
+                        value: store.blob.spectrogram.fmax
+                    ) { store.setFMax($0) }
+                    Toggle("dB", isOn: store.binding(\.spectrogram.decibelsEnabled))
+                    DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor), range: -200...0, step: 5)
+                    DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange), range: 10...200, step: 5)
+                    ResetRow(
+                        title: "Reset Spectrogram Settings",
+                        detail: "Resets only the settings on this tab.",
+                        identifier: "settings.resetSpectrogram"
+                    ) {
+                        store.resetSpectrogramSettings()
+                    }
                 }
             } header: {
-                Text("Advanced")
+                AdvancedHeader(pane: .spectrogram, sections: sections)
             }
         }
     }
