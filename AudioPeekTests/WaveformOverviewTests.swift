@@ -230,6 +230,39 @@ final class WaveformOverviewTests: XCTestCase {
         }
     }
 
+    func testCoarseSpectrogramReachesTheLastColumnWhenColumnsAreShorterThanTheWindow() throws {
+        // Like a file a little over 30 s: each column spans fewer frames than one FFT,
+        // so the coarse read takes every frame. The picture must still fill the pane.
+        let columns = 64
+        let inspectPerColumn = 2048
+        var seed: UInt32 = 1
+        let samples = (0..<(columns * inspectPerColumn / 2)).map { _ -> Int16 in
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return Int16(truncatingIfNeeded: Int32(bitPattern: seed) >> 17)
+        }
+        let url = try writeWav(frames: samples)
+        let overview = WaveformOverview()
+        let log = SnapshotLog()
+        overview.onSnapshot = { log.append($0) }
+        defer {
+            overview.cancel()
+            try? FileManager.default.removeItem(at: url)
+        }
+        var job = overviewJob()
+        job.hop = inspectPerColumn
+        overview.start(
+            url: url,
+            columnCount: columns,
+            waveformDual: false,
+            computeWaveform: true,
+            spectrogram: job,
+            inspectPerColumn: inspectPerColumn
+        )
+        XCTAssertTrue(spin(for: 5) { log.contains { $0.finished } })
+        let finished = try XCTUnwrap(log.all().last { $0.finished })
+        XCTAssertEqual(finished.spectrogram.first?.count, columns)
+    }
+
     func testSeveralChunksInsideTheWindowDeliverOnce() throws {
         let chunks = 16
         let steps = 6
