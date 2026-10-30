@@ -84,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if config?.overviewStall == true {
             slip.setOverviewStall(true)
         }
+        if config?.forceSolidChrome == true {
+            slip.forceSolidChrome = true
+        }
         store.onChange = { [weak self] in
             self?.applyChrome()
             self?.slip.applySettings()

@@ -285,7 +285,8 @@ state = waitUntil(at: stateURL, timeout: 4) { ($0["overviewPassID"]?.int ?? -1) 
 Check.expect((state["overviewPassID"]?.int ?? -1) != steadyPass, "a width change restarts the pass once")
 Check.expect((state["overviewPeakPasses"]?.int ?? 0) == 1, "the restarted pass is still alone")
 let restartedColumns = state["overviewColumnCount"]?.int ?? 0
-Check.expect(abs(restartedColumns - 700) <= 4, "columns follow the pane width, got \(restartedColumns)")
+// The panes sit inside a 12 pt glass rim on each side, so a 700 pt panel has 676 pt panes.
+Check.expect(abs(restartedColumns - (700 - 2 * 12)) <= 4, "columns follow the pane width, got \(restartedColumns)")
 
 _ = command("quit")
 Thread.sleep(forTimeInterval: 0.3)

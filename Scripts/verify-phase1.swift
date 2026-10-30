@@ -152,7 +152,9 @@ func settingsWindowID() -> CGWindowID? {
     for window in info {
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let title = window[kCGWindowName as String] as? String ?? ""
-        if owner == "AudioPeek" && (title.isEmpty || title == "AudioPeek Settings") {
+        // The Settings window is titled after its selected pane and floats at the preview's level.
+        let settingsTitles = ["", "AudioPeek Settings", "General", "Waveform", "Spectrogram"]
+        if owner == "AudioPeek" && settingsTitles.contains(title) {
             return window[kCGWindowNumber as String] as? CGWindowID
         }
     }

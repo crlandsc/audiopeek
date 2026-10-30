@@ -9,7 +9,10 @@ AudioPeek is a lightweight app designed to supplement the audio preview on Mac.
 When previewing audio files on Mac, have you ever wished you could see more than just a scrub bar? AudioPeek allows audio previews to render the waveform *and* spectrogram, filling the gap between a bare bones audio preview and having to import files into a professional audio application.
 
 <p align="center">
-  <img alt="AudioPeek" src="audiopeek-preview.png">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="audiopeek-preview-dark.png">
+    <img alt="The AudioPeek preview panel showing a waveform above a spectrogram" src="audiopeek-preview.png">
+  </picture>
 </p>
 
 
@@ -33,7 +36,7 @@ You only need to do this once. Apple walks through the same steps in [Safely ope
 AudioPeek needs to ask Finder which file you have selected. The first time you press the shortcut, macOS asks:
 > "AudioPeek" wants access to control "Finder".
 
-Click **Allow**. If you clicked **Don't Allow**, a **Finder access** section appears at the top of AudioPeek's Settings. Click **Open Automation** there. That opens the Mac's Automation settings. Turn on **Finder** under AudioPeek, then press the shortcut again.
+Click **Allow**. If you clicked **Don't Allow**, a **Finder access** section appears at the top of the General tab in AudioPeek's Settings. Click **Open Automation** there. That opens the Mac's Automation settings. Turn on **Finder** under AudioPeek, then press the shortcut again.
 
 
 ## How to use it
@@ -68,24 +71,25 @@ For video files (`.mp4`), AudioPeek only shows and plays the audio. Long files w
 
 ## Settings
 
-Open Settings from the AudioPeek icon in the menu bar, or from the gear in the top right of the panel.
+Open Settings from the AudioPeek icon in the menu bar, or from the gear in the top right of the panel. Settings has three tabs:
 
-From there you can:
+- **General**: change the **shortcut** from Option-Space to something else, turn **Open at login** on or off, show or hide the **menu bar icon** and the **Dock icon**, and choose whether to show the **waveform**, the **spectrogram**, or both (and how to split the space).
+- **Waveform**: show every channel separately instead of one combined view (**dual view**), switch between linear and dB amplitude, and pick the waveform color.
+- **Spectrogram**: dual view, the spectrogram type (linear, log frequency, or mel), its colors, and optional **frequency** and **time axes**.
 
-- Change the **shortcut** from Option-Space to something else.
-- Show or hide the **waveform** and **spectrogram**, and adjust layout.
-- Show every channel separately instead of one combined view (**dual view**).
-- Pick the waveform color and the spectrogram colors.
-- Tune the spectrogram (type, resolution, frequency range, and dB range) if you want more control.
-- Show or hide the **menu bar icon** and the **Dock icon**.
+Each tab ends with a collapsed **Advanced** section:
 
-**Reset** puts every setting back to how it started (volume and panel location remain unchanged).
+- **General** has **Full detail**, which reads every sample even for files longer than 30 seconds, and **Reset All Settings**, which puts every setting on all three tabs back to how it started.
+- **Spectrogram** has the analysis controls (FFT size, hop, window, number of mel bands, frequency range, and dB range) if you want more control.
+- **Waveform** and **Spectrogram** each have a reset that only touches that tab.
+
+Resetting never changes the volume or the panel's size and position.
 
 #### Accidentally hid both icons?
 If you turned off the menu bar icon *and* the Dock icon, open AudioPeek again from Applications (or Spotlight) and Settings will be displayed.
 
 #### Open at login
-AudioPeek turns on **Open at login** the first time it opens a file, so the shortcut is always ready. You can turn it off in Settings. If macOS doesn't allow it, Settings shows an **Open Login Items** button. Click it and add AudioPeek to the list.
+AudioPeek turns on **Open at login** the first time it opens a file, so the shortcut is always ready. You can turn it off in Settings. Next to it is an **Open Login Items** button that takes you to the Mac's Login Items settings. If macOS doesn't allow AudioPeek to add itself, Settings says so: click the button and add AudioPeek to the list.
 
 
 ## Updating

@@ -13,6 +13,7 @@ struct TestLaunchConfig {
     var finderScript: ScriptedFinderSelection.Script?
     var injectedLoad: InjectedLoad?
     var overviewStall: Bool
+    var forceSolidChrome: Bool
 
     func makeDefaults() -> UserDefaults {
         guard let defaults = UserDefaults(suiteName: defaultsSuite) else {
@@ -63,7 +64,8 @@ struct TestLaunchConfig {
             injection: injection,
             finderScript: finderScript(from: json["finderSelection"]),
             injectedLoad: injectedLoad(from: json["machineLoad"]),
-            overviewStall: json["overviewStall"] as? Bool ?? false
+            overviewStall: json["overviewStall"] as? Bool ?? false,
+            forceSolidChrome: json["forceSolidChrome"] as? Bool ?? false
         )
     }
 
@@ -227,6 +229,11 @@ final class TestBridge: NSObject {
             waveformGreen: slip.waveformGreen,
             waveformBlue: slip.waveformBlue,
             settingsLabels: settings.controlLabels(),
+            settingsPane: settings.currentPane.rawValue,
+            slipUsesGlass: slip.usesGlass,
+            settingsFrameWidth: settings.frame.width,
+            settingsFrameHeight: settings.frame.height,
+            settingsFrameMaxY: settings.frame.maxY,
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -262,6 +269,20 @@ final class TestBridge: NSObject {
             app.application(NSApp, open: paths.map { URL(fileURLWithPath: $0) })
         case "openSettings":
             onOpenSettings()
+        case "setHover":
+            if let x = number("x", in: userInfo), let y = number("y", in: userInfo) {
+                slip.setHoverOverride(NSPoint(x: x, y: y))
+            } else {
+                slip.setHoverOverride(nil)
+            }
+        case "setSettingsAdvanced":
+            if let name = userInfo["pane"] as? String, let pane = SettingsPane(rawValue: name) {
+                settings.setAdvanced(pane, expanded: bool("expanded", in: userInfo) ?? true)
+            }
+        case "selectSettingsPane":
+            if let name = userInfo["pane"] as? String, let pane = SettingsPane(rawValue: name) {
+                settings.select(pane)
+            }
         case "snapshot":
             if let path = userInfo["path"] as? String {
                 _ = settings.writePNG(to: URL(fileURLWithPath: path))
@@ -503,6 +524,11 @@ private struct TestState: Encodable {
     var waveformGreen: Double
     var waveformBlue: Double
     var settingsLabels: [String]
+    var settingsPane: String
+    var slipUsesGlass: Bool
+    var settingsFrameWidth: Double
+    var settingsFrameHeight: Double
+    var settingsFrameMaxY: Double
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double

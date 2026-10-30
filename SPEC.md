@@ -160,7 +160,7 @@ Folders inside the app target, not extra packages:
 - **FinderBridge**: Apple Events to Finder.
 - **Viewer**: overlay and playback.
 - **Analysis**: chunked decode, STFT, and mel on a background queue. A selection change discards the in-flight pass. Pressure pauses it (see Machine load). On that queue, call `ExtAudioFileOpenURL` and check cancel between every `ExtAudioFileRead`.
-- **Settings**: SwiftUI form, one UserDefaults blob. The engine rereads that blob when settings change and at the start of the next analysis pass. The remembered window frame lives in that blob. The volume slider is a separate persisted value.
+- **Settings**: a preference-style window with three toolbar panes (General, Waveform, Spectrogram), each a grouped SwiftUI form; the window title follows the pane and the window sizes to it. One UserDefaults blob. The engine rereads that blob when settings change and at the start of the next analysis pass. The remembered window frame lives in that blob. The volume slider is a separate persisted value.
 
 The process is an `LSUIElement` menu-bar extra. No Dock icon by default. The status item is shown by default and can be hidden. It shows the play mark and does not show the name. Its menu is Settings and Quit. The app icon is that same mark. Playback and analysis stay in-process. The app is not sandboxed.
 
@@ -180,7 +180,7 @@ The Carbon hotkey handler returns immediately. It does not wait on Finder, open,
 
 First show is 860 by 500 points, centered on the screen of the front Finder window. After that, remember the frame in the settings blob. A width change is a column-grid change: debounce the drag (mouse-up, or about 200 ms after the last change), then restart the overview once. Split height does not restart the pass.
 
-The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. No pane labels. No separate transport bar. Header order, as drawn: play/pause, filename, compact metadata, volume slider, loop, subtle settings gear. Metadata sits against the volume control and the filename truncates first. The gear opens the settings window.
+The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. On macOS 26 and later the panel is Liquid Glass (regular style, 18 pt continuous corners); on macOS 15 it is the same layout on a solid background. The waveform and spectrogram are solid cards inset 12 pt from the sides and bottom, with concentric corners and a 6 pt gap that holds the split handle. That glass rim (12 pt on the sides and bottom, 8 pt along the top, minus the header controls and the cut-away corners) is the resize grab area. Hovering it shows a soft rim glow that follows the pointer along the panel's outline, the hint that works while Finder is front. No pane labels. No separate transport bar. Header order, as drawn: play/pause, filename, compact metadata, volume slider, loop, subtle settings gear. Metadata sits against the volume control and the filename truncates first; the play time never truncates. Header text and icons use the system label colors. The gear opens the settings window.
 
 Both panes start visible, split 50/50. The split is draggable and remembered. Hiding a pane gives the other the leftover height.
 
@@ -224,7 +224,7 @@ Follow the system appearance (`NSApp.effectiveAppearance` or equivalent), includ
 
 The factory spectrogram colors are magma. Settings can also use inferno, viridis, or gray. Changing colors redraws the current picture and does not start a new overview pass.
 
-The playhead is a 1 px vertical hairline on both panes. No grabber, no riding dot. Use the Slip playhead color from the prototype stylesheet (the volume slider accent uses that same color there).
+The playhead is a 1 px vertical hairline on both panes. No grabber, no riding dot. Use the Slip playhead color from the prototype stylesheet. The volume slider fill and the loop-on state use the system accent color instead, drawn by the app so they stay colored while the panel is not the key window.
 
 Waveform color defaults to `NSColor.systemBlue` (the standard light and dark system blues, not the user's accent color). A color well in the settings window can override it. Reset to default restores system blue.
 
@@ -249,7 +249,7 @@ Sources: [Define the version 1 settings, presets, and viewer interactions](https
 
 One settings blob in the UI (UserDefaults or equivalent). No config file. No named presets. No backup store.
 
-Reset immediately replaces the settings-window knobs with the factory set, including Option-Space, the login item, icon visibility, split 50/50, and the system-blue waveform. There is no undo. Reset does not change the volume slider or the remembered window frame. If the blob does not decode, use factory defaults and continue.
+Reset All Settings (General, inside the collapsed Advanced section) immediately replaces the settings-window knobs with the factory set, including Option-Space, the login item, icon visibility, split 50/50, and the system-blue waveform. There is no undo. Every tab ends with a collapsed Advanced section; the Waveform and Spectrogram tabs' Advanced sections hold their own reset (Reset Waveform Settings, Reset Spectrogram Settings) that restores only that tab's settings, including the Spectrogram analysis values. Opening or closing Advanced resizes the window with the same animation as switching tabs. Reset does not change the volume slider or the remembered window frame. If the blob does not decode, use factory defaults and continue.
 
 The window is small, in the spirit of Rectangle, DockDoor, and Hidden Bar. It holds:
 

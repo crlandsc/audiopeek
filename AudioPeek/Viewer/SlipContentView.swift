@@ -96,19 +96,31 @@ enum SlipSystemCursors {
 }
 
 enum SlipResize {
-    static let margin: CGFloat = 10
-    static let cornerLength: CGFloat = 20
+    /// The grab area is the glass rim between the panel edge and the panes.
+    static let margin: CGFloat = SlipLayout.rim
+    static let topMargin: CGFloat = SlipLayout.topRim
+    static let cornerLength: CGFloat = max(20, SlipLayout.cornerRadius + 8)
+
+    /// Whether a point lies inside the panel's rounded shape (the cut-away corners are outside).
+    static func insideRoundedShape(_ point: NSPoint, in bounds: NSRect, radius: CGFloat = SlipLayout.cornerRadius) -> Bool {
+        let cx = point.x < bounds.minX + radius ? bounds.minX + radius : (point.x > bounds.maxX - radius ? bounds.maxX - radius : nil)
+        let cy = point.y < bounds.minY + radius ? bounds.minY + radius : (point.y > bounds.maxY - radius ? bounds.maxY - radius : nil)
+        guard let cx, let cy else { return true }
+        return hypot(point.x - cx, point.y - cy) <= radius
+    }
 
     static func edges(at point: NSPoint, in bounds: NSRect) -> SlipResizeEdges {
         guard bounds.width > 0, bounds.height > 0 else { return SlipResizeEdges() }
         guard point.x >= bounds.minX, point.x <= bounds.maxX,
-              point.y >= bounds.minY, point.y <= bounds.maxY else {
+              point.y >= bounds.minY, point.y <= bounds.maxY,
+              insideRoundedShape(point, in: bounds) else {
             return SlipResizeEdges()
         }
-        var left = point.x <= bounds.minX + margin
-        var right = point.x >= bounds.maxX - margin
-        var top = point.y <= bounds.minY + margin
-        var bottom = point.y >= bounds.maxY - margin
+        // Strict edges: the band ends where the pane begins, so the pane's first and last column seek.
+        var left = point.x < bounds.minX + margin
+        var right = point.x > bounds.maxX - margin
+        var top = point.y < bounds.minY + topMargin
+        var bottom = point.y > bounds.maxY - margin
         if left && right {
             if point.x - bounds.minX <= bounds.maxX - point.x {
                 right = false
@@ -173,18 +185,35 @@ enum SlipResize {
     }
 }
 
-/// An accent line along the resize edge or corner under the pointer. Finder
-/// ignores cursor changes from AudioPeek while Finder is front, so this is the
-/// hint that shows where the panel can be grabbed.
+/// Rim glow: a soft pool of light on the glass rim that follows the pointer along the
+/// panel's outline. Finder ignores cursor changes from AudioPeek while Finder is front,
+/// so this is the hint that shows where the panel can be grabbed. It only lights the
+/// rim, which is exactly the grab area.
 final class SlipResizeHighlight: NSView {
-    var edges = SlipResizeEdges() {
+    /// Where a drag would resize right now.
+    private(set) var edges = SlipResizeEdges()
+    var cornerRadius: CGFloat = SlipLayout.cornerRadius {
         didSet {
-            if edges != oldValue {
-                needsDisplay = true
+            if cornerRadius != oldValue {
+                outline = []
             }
         }
     }
-    var cornerRadius: CGFloat = 10
+    private(set) var intensity: CGFloat = 0
+    private var target: CGFloat = 0
+    /// Eased and target positions, as arc lengths along the panel outline.
+    private(set) var position: CGFloat?
+    private var goal: CGFloat?
+    private var outline: [NSPoint] = []
+    private var outlineSize = NSSize.zero
+    private var link: CADisplayLink?
+    private var lastTick: CFTimeInterval = 0
+    private var lastPool = NSRect.zero
+
+    static let poolRadius: CGFloat = 95
+    static let fadeIn: Double = 0.12
+    static let fadeOut: Double = 0.18
+    static let easing: Double = 0.055
 
     override var isFlipped: Bool { true }
 
@@ -201,38 +230,203 @@ final class SlipResizeHighlight: NSView {
         nil
     }
 
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    func update(edges: SlipResizeEdges, pointer: NSPoint?) {
+        self.edges = edges
+        if edges.isActive, let pointer {
+            let arc = nearestArcLength(to: pointer)
+            goal = arc
+            // Appear where the pointer is instead of sliding over from an old spot.
+            if position == nil || intensity < 0.04 || reduceMotion {
+                position = arc
+            }
+            target = 1
+        } else {
+            target = 0
+        }
+        guard window != nil, !reduceMotion else {
+            intensity = target
+            position = goal ?? position
+            invalidatePool()
+            return
+        }
+        startAnimating()
+    }
+
+    private func startAnimating() {
+        guard link == nil else { return }
+        let link = displayLink(target: self, selector: #selector(step(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        lastTick = 0
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
+        let now = link.timestamp
+        let dt = lastTick == 0 ? 1.0 / 60 : min(1.0 / 15, now - lastTick)
+        lastTick = now
+        if intensity < target {
+            intensity = min(target, intensity + CGFloat(dt / Self.fadeIn))
+        } else if intensity > target {
+            intensity = max(target, intensity - CGFloat(dt / Self.fadeOut))
+        }
+        if let position, let goal {
+            let length = CGFloat(max(1, outlinePoints().count))
+            let next = position + wrapped(goal - position, length) * CGFloat(1 - exp(-dt / Self.easing))
+            let settled = abs(wrapped(goal - next, length)) < 0.25
+            self.position = settled ? goal : (next.truncatingRemainder(dividingBy: length) + length).truncatingRemainder(dividingBy: length)
+        }
+        invalidatePool()
+        if intensity == target, position == goal || target == 0 {
+            link.invalidate()
+            self.link = nil
+        }
+    }
+
+    private func wrapped(_ delta: CGFloat, _ length: CGFloat) -> CGFloat {
+        var d = delta.truncatingRemainder(dividingBy: length)
+        if d > length / 2 { d -= length }
+        if d < -length / 2 { d += length }
+        return d
+    }
+
+    /// The panel outline sampled every point, clockwise from the top edge.
+    private func outlinePoints() -> [NSPoint] {
+        if outline.isEmpty || outlineSize != bounds.size {
+            outlineSize = bounds.size
+            outline = Self.outline(of: bounds, radius: cornerRadius)
+        }
+        return outline
+    }
+
+    static func outline(of rect: NSRect, radius r: CGFloat) -> [NSPoint] {
+        var points: [NSPoint] = []
+        func segment(_ a: NSPoint, _ b: NSPoint) {
+            let count = max(1, Int(hypot(b.x - a.x, b.y - a.y).rounded()))
+            for i in 0..<count {
+                let t = CGFloat(i) / CGFloat(count)
+                points.append(NSPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+            }
+        }
+        func arc(_ center: NSPoint, _ start: CGFloat) {
+            let count = max(1, Int((r * .pi / 2).rounded()))
+            for i in 0..<count {
+                let angle = start + (.pi / 2) * CGFloat(i) / CGFloat(count)
+                points.append(NSPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle)))
+            }
+        }
+        let (x0, y0, x1, y1) = (rect.minX, rect.minY, rect.maxX, rect.maxY)
+        segment(NSPoint(x: x0 + r, y: y0), NSPoint(x: x1 - r, y: y0))
+        arc(NSPoint(x: x1 - r, y: y0 + r), -.pi / 2)
+        segment(NSPoint(x: x1, y: y0 + r), NSPoint(x: x1, y: y1 - r))
+        arc(NSPoint(x: x1 - r, y: y1 - r), 0)
+        segment(NSPoint(x: x1 - r, y: y1), NSPoint(x: x0 + r, y: y1))
+        arc(NSPoint(x: x0 + r, y: y1 - r), .pi / 2)
+        segment(NSPoint(x: x0, y: y1 - r), NSPoint(x: x0, y: y0 + r))
+        arc(NSPoint(x: x0 + r, y: y0 + r), .pi)
+        return points
+    }
+
+    func nearestArcLength(to point: NSPoint) -> CGFloat {
+        let points = outlinePoints()
+        var best = 0
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for (index, candidate) in points.enumerated() {
+            let dx = candidate.x - point.x
+            let dy = candidate.y - point.y
+            let distance = dx * dx + dy * dy
+            if distance < bestDistance {
+                bestDistance = distance
+                best = index
+            }
+        }
+        return CGFloat(best)
+    }
+
+    var poolCenter: NSPoint? {
+        guard let position else { return nil }
+        let points = outlinePoints()
+        guard !points.isEmpty else { return nil }
+        return points[Int(position.rounded()) % points.count]
+    }
+
+    private func invalidatePool() {
+        let pool = poolCenter.map {
+            NSRect(x: $0.x - Self.poolRadius, y: $0.y - Self.poolRadius, width: Self.poolRadius * 2, height: Self.poolRadius * 2)
+        } ?? .zero
+        setNeedsDisplay(pool.union(lastPool).intersection(bounds))
+        lastPool = intensity > 0.001 ? pool : .zero
+    }
+
+    private static func smooth(_ e0: CGFloat, _ e1: CGFloat, _ x: CGFloat) -> CGFloat {
+        let t = min(1, max(0, (x - e0) / (e1 - e0)))
+        return t * t * (3 - 2 * t)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        guard edges.isActive else { return }
-        let line: CGFloat = 3
-        let isCorner = (edges.left || edges.right) && (edges.top || edges.bottom)
-        let reach = isCorner ? SlipResize.cornerLength * 2 : SlipResize.margin
-        var region = bounds
-        if edges.left {
-            region.size.width = reach
-        }
-        if edges.right {
-            region.origin.x = bounds.maxX - reach
-            region.size.width = reach
-        }
-        if edges.top {
-            region.size.height = reach
-        }
-        if edges.bottom {
-            region.origin.y = bounds.maxY - reach
-            region.size.height = reach
-        }
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: region).addClip()
-        let inset = line / 2
-        let path = NSBezierPath(
-            roundedRect: bounds.insetBy(dx: inset, dy: inset),
-            xRadius: max(0, cornerRadius - inset),
-            yRadius: max(0, cornerRadius - inset)
+        guard intensity > 0.001, let center = poolCenter, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) ?? .systemBlue
+        let base: CGFloat = (dark ? 0.26 : 0.22) * (contrast ? 1.8 : 1)
+        let sheen: CGFloat = dark ? 0.34 : 0.6
+        let r = cornerRadius
+        ctx.saveGState()
+        // Only the rim: between the panel edge and the panes.
+        let inner = NSRect(
+            x: bounds.minX + SlipLayout.rim,
+            y: bounds.minY + SlipLayout.topRim,
+            width: max(0, bounds.width - SlipLayout.rim * 2),
+            height: max(0, bounds.height - SlipLayout.topRim - SlipLayout.rim)
         )
-        path.lineWidth = line
-        NSColor.controlAccentColor.withAlphaComponent(0.85).setStroke()
-        path.stroke()
-        NSGraphicsContext.restoreGraphicsState()
+        let ring = CGMutablePath()
+        ring.addPath(CGPath(roundedRect: bounds, cornerWidth: r, cornerHeight: r, transform: nil))
+        let innerRadius = max(1, r - SlipLayout.rim)
+        ring.addPath(CGPath(roundedRect: inner, cornerWidth: innerRadius, cornerHeight: innerRadius, transform: nil))
+        ctx.addPath(ring)
+        ctx.clip(using: .evenOdd)
+        ctx.setAlpha(intensity)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        // A soft accent band and a white sheen near the edge, fading in every direction: no hard lines.
+        ctx.setLineWidth(0.7)
+        var depth: CGFloat = 0.25
+        while depth <= 8 {
+            let band = base * (0.35 + 0.65 * Self.smooth(0, 1.2, depth)) * (1 - Self.smooth(5.5, 8, depth))
+            let white = sheen * exp(-pow((depth - 1.5) / 0.9, 2) / 2) * (0.4 + 0.6 * Self.smooth(0, 0.9, depth))
+            let rect = bounds.insetBy(dx: depth, dy: depth)
+            let radius = max(1, r - depth)
+            let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+            if band > 0.002 {
+                ctx.setStrokeColor(accent.withAlphaComponent(band / 1.4).cgColor)
+                ctx.addPath(path)
+                ctx.strokePath()
+            }
+            if white > 0.002 {
+                ctx.setStrokeColor(NSColor.white.withAlphaComponent(white / 1.4).cgColor)
+                ctx.addPath(path)
+                ctx.strokePath()
+            }
+            depth += 0.5
+        }
+        // Keep only a pool around the pointer, fading out along the edge.
+        let mask = [1.0, 0.9, 0.45, 0.12, 0.0].map { NSColor.white.withAlphaComponent($0).cgColor } as CFArray
+        let locations: [CGFloat] = [0, 0.25, 0.55, 0.8, 1]
+        if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: mask, locations: locations) {
+            ctx.setBlendMode(.destinationIn)
+            ctx.drawRadialGradient(
+                gradient,
+                startCenter: center,
+                startRadius: 0,
+                endCenter: center,
+                endRadius: Self.poolRadius,
+                options: [.drawsAfterEndLocation]
+            )
+        }
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
     }
 }
 
@@ -698,6 +892,79 @@ final class MetadataCell: NSTextFieldCell {
     }
 }
 
+/// Panel geometry in the content view's flipped coordinates. Layout, hit testing and
+/// split dragging all read it, so they always agree.
+struct SlipLayout {
+    static let headerHeight: CGFloat = 46
+    static let minPane: CGFloat = 48
+    /// Continuous corner radius matched to a standard macOS 27 window.
+    static let cornerRadius: CGFloat = 18
+    /// Glass rim around the panes: sides and bottom, and above the header controls.
+    static let rim: CGFloat = 12
+    static let topRim: CGFloat = 8
+    static let paneGap: CGFloat = 6
+    /// Concentric with the panel corner, with a minimum so the panes never look square.
+    static let paneRadius: CGFloat = max(cornerRadius - rim, 8)
+    /// Header controls sit clear of the side rim.
+    static let headerPad: CGFloat = 14
+
+    var size: NSSize
+    /// Glass rim between the panel edge and the panes, on the sides and bottom.
+    var inset: CGFloat = 0
+    /// Space between the two panes; the split handle sits in it.
+    var gap: CGFloat = 1
+
+    var bodyTop: CGFloat { Self.headerHeight + (inset == 0 ? 1 : 0) }
+
+    var body: NSRect {
+        NSRect(
+            x: inset,
+            y: bodyTop,
+            width: max(0, size.width - inset * 2),
+            height: max(0, size.height - bodyTop - inset)
+        )
+    }
+
+    func panes(waveform: Bool, spectrogram: Bool, split: Double) -> (wave: NSRect?, divider: NSRect?, spec: NSRect?) {
+        let body = self.body
+        guard waveform && spectrogram else {
+            return (waveform ? body : nil, nil, spectrogram ? body : nil)
+        }
+        let available = max(0, body.height - gap)
+        let waveHeight = min(max(available * CGFloat(split), Self.minPane), max(Self.minPane, available - Self.minPane))
+        let wave = NSRect(x: body.minX, y: body.minY, width: body.width, height: waveHeight)
+        let divider = NSRect(x: body.minX, y: wave.maxY, width: body.width, height: gap)
+        let spec = NSRect(x: body.minX, y: divider.maxY, width: body.width, height: max(0, body.maxY - divider.maxY))
+        return (wave, divider, spec)
+    }
+
+    /// The split fraction that puts the middle of the gap at `y`.
+    func splitFraction(atY y: CGFloat) -> Double {
+        let available = max(1, body.height - gap)
+        return Double((y - body.minY - gap / 2) / available)
+    }
+}
+
+/// Draws the volume track with the accent fill. The panel never becomes key, and the
+/// system draws a slider in a non-key window with a gray fill, ignoring trackFillColor.
+final class AccentSliderCell: NSSliderCell {
+    static let thickness: CGFloat = 4
+
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        let thickness = Self.thickness
+        let track = NSRect(x: rect.minX, y: rect.midY - thickness / 2, width: rect.width, height: thickness)
+        let radius = thickness / 2
+        NSColor.quaternaryLabelColor.setFill()
+        NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius).fill()
+        let knob = knobRect(flipped: flipped)
+        let fillEnd = min(max(knob.midX, track.minX), track.maxX)
+        guard fillEnd > track.minX else { return }
+        NSColor.controlAccentColor.setFill()
+        let filled = NSRect(x: track.minX, y: track.minY, width: fillEnd - track.minX, height: thickness)
+        NSBezierPath(roundedRect: filled, xRadius: radius, yRadius: radius).fill()
+    }
+}
+
 final class SlipContentView: NSView {
     let playButton = NSButton()
     let filenameLabel = NSTextField(labelWithString: "")
@@ -743,6 +1010,16 @@ final class SlipContentView: NSView {
     private var showProgress = false
     private var progressFraction = 0.0
     private(set) var isResizeDrag = false
+    /// True when the panel sits in a Liquid Glass view; the view then draws no background or border of its own.
+    var usesGlass = false {
+        didSet {
+            if usesGlass != oldValue {
+                applyPalette()
+            }
+        }
+    }
+    /// A test hook: hover here instead of where the mouse is.
+    var hoverOverride: NSPoint?
     private var resizeTracking: NSTrackingArea?
     let hoverPollInterval: TimeInterval = 1.0 / 60.0
     private var hoverTimer: Timer?
@@ -754,9 +1031,9 @@ final class SlipContentView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = SlipLayout.cornerRadius
+        layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        layer?.borderWidth = 1
 
         configurePlay(playButton)
         playButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play or pause")
@@ -772,6 +1049,7 @@ final class SlipContentView: NSView {
         metadataLabel.lineBreakMode = .byTruncatingTail
         metadataLabel.setAccessibilityIdentifier("slip.metadata")
 
+        volumeSlider.cell = AccentSliderCell()
         volumeSlider.controlSize = .small
         volumeSlider.minValue = 0
         volumeSlider.maxValue = 1
@@ -822,6 +1100,18 @@ final class SlipContentView: NSView {
         waveformPane.addSubview(waveformPlayhead)
         spectrogramPane.addSubview(spectrogramPlayhead)
         applyPalette()
+        // Follow a change of the system accent color without a relaunch.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemColorsChanged),
+            name: NSColor.systemColorsDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func systemColorsChanged() {
+        volumeSlider.needsDisplay = true
+        loopButton.needsDisplay = true
     }
 
     required init?(coder: NSCoder) {
@@ -856,7 +1146,7 @@ final class SlipContentView: NSView {
 
     func setLoop(_ enabled: Bool) {
         loopButton.state = enabled ? .on : .off
-        loopButton.contentTintColor = enabled ? palette.head : palette.muted
+        loopButton.contentTintColor = enabled ? .controlAccentColor : .secondaryLabelColor
     }
 
     func apply(showWaveform: Bool, showSpectrogram: Bool, split: Double, volume: Double) {
@@ -871,11 +1161,12 @@ final class SlipContentView: NSView {
 
     override func layout() {
         super.layout()
-        let headerHeight: CGFloat = 34
-        let pad: CGFloat = 10
+        let geometry = currentLayout
+        let headerHeight = SlipLayout.headerHeight
+        let pad = SlipLayout.headerPad
         let gap: CGFloat = 8
         let textGap: CGFloat = 12
-        let button: CGFloat = 24
+        let button: CGFloat = 28
         let volumeWidth: CGFloat = 72
         let midY = headerHeight / 2
         let buttonY = midY - button / 2
@@ -889,7 +1180,7 @@ final class SlipContentView: NSView {
         volumeSlider.frame = NSRect(x: volumeX, y: midY - sliderHeight / 2, width: volumeWidth, height: sliderHeight)
         let nameX = pad + button + gap
         // Squeeze order: the metadata info truncates first, then the filename, and the time never does.
-        let minNameWidth: CGFloat = 80
+        let minNameWidth: CGFloat = 72
         let available = max(0, volumeX - textGap - nameX - minNameWidth - textGap)
         let metaWidth = (metadataLabel.cell as? MetadataCell)?.fittingWidth(within: available)
             ?? min(fieldWidth(metadataLabel), available)
@@ -904,36 +1195,25 @@ final class SlipContentView: NSView {
         filenameLabel.lineBreakMode = .byTruncatingTail
         metadataLabel.lineBreakMode = .byTruncatingTail
         progressFill.isHidden = !showProgress
+        let body = geometry.body
         progressFill.frame = NSRect(
-            x: 0,
-            y: headerHeight - 2,
-            width: bounds.width * progressFraction,
+            x: body.minX,
+            y: headerHeight - 4,
+            width: body.width * progressFraction,
             height: 2
         )
 
         waveformPane.isHidden = !showWaveform
         spectrogramPane.isHidden = !showSpectrogram
-        let both = showWaveform && showSpectrogram
-        divider.isHidden = !both
-        let top = headerHeight + 1
-        let body = max(0, bounds.height - top)
-        if both {
-            let dividerHeight: CGFloat = 1
-            let available = max(0, body - dividerHeight)
-            let waveHeight = min(max(available * splitFraction, 48), max(48, available - 48))
-            waveformPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: waveHeight)
-            divider.frame = NSRect(x: 0, y: top + waveHeight, width: bounds.width, height: dividerHeight)
-            let specY = top + waveHeight + dividerHeight
-            spectrogramPane.frame = NSRect(x: 0, y: specY, width: bounds.width, height: max(0, bounds.height - specY))
-        } else if showWaveform {
-            waveformPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: body)
-        } else if showSpectrogram {
-            spectrogramPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: body)
-        }
+        let panes = geometry.panes(waveform: showWaveform, spectrogram: showSpectrogram, split: splitFraction)
+        divider.isHidden = panes.divider == nil
+        if let wave = panes.wave { waveformPane.frame = wave }
+        if let divide = panes.divider { divider.frame = divide }
+        if let spec = panes.spec { spectrogramPane.frame = spec }
         placePlayhead(waveformPlayhead, in: waveformPane)
         placePlayhead(spectrogramPlayhead, in: spectrogramPane)
         resizeHighlight.frame = bounds
-        resizeHighlight.cornerRadius = layer?.cornerRadius ?? 10
+        resizeHighlight.cornerRadius = SlipLayout.cornerRadius
     }
 
     private func placePlayhead(_ playhead: NSView, in pane: NSView) {
@@ -1016,11 +1296,12 @@ final class SlipContentView: NSView {
         super.resetCursorRects()
         discardCursorRects()
         let margin = SlipResize.margin
+        let topMargin = SlipResize.topMargin
         let corner = SlipResize.cornerLength
         let width = bounds.width
         let height = bounds.height
         guard width > corner * 2, height > corner * 2 else { return }
-        addCursorRect(NSRect(x: corner, y: 0, width: width - corner * 2, height: margin), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: corner, y: 0, width: width - corner * 2, height: topMargin), cursor: .resizeUpDown)
         addCursorRect(NSRect(x: corner, y: height - margin, width: width - corner * 2, height: margin), cursor: .resizeUpDown)
         addCursorRect(NSRect(x: 0, y: corner, width: margin, height: height - corner * 2), cursor: .resizeLeftRight)
         addCursorRect(NSRect(x: width - margin, y: corner, width: margin, height: height - corner * 2), cursor: .resizeLeftRight)
@@ -1034,7 +1315,7 @@ final class SlipContentView: NSView {
         for spot in corners {
             let bandY = spot.y == 0 ? 0 : height - margin
             let bandX = spot.x == 0 ? 0 : width - margin
-            addCursorRect(NSRect(x: spot.x, y: bandY, width: corner, height: margin), cursor: spot.cursor)
+            addCursorRect(NSRect(x: spot.x, y: bandY, width: corner, height: spot.y == 0 ? topMargin : margin), cursor: spot.cursor)
             addCursorRect(NSRect(x: bandX, y: spot.y, width: margin, height: corner), cursor: spot.cursor)
         }
         if !divider.isHidden, divider.frame.width > margin * 2, divider.frame.height > 0 {
@@ -1054,7 +1335,7 @@ final class SlipContentView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        resizeHighlight.edges = SlipResizeEdges()
+        resizeHighlight.update(edges: SlipResizeEdges(), pointer: nil)
         endHoverCursor()
     }
 
@@ -1085,13 +1366,18 @@ final class SlipContentView: NSView {
     /// Shows the grab zone under the pointer. Unlike the cursor, this works
     /// while Finder is the front app.
     func updateResizeHighlight(at point: NSPoint, panelHit: Bool) {
-        resizeHighlight.edges = panelHit && containsPointer(point) ? resizeEdges(at: point) : SlipResizeEdges()
+        let hit = panelHit && containsPointer(point)
+        resizeHighlight.update(edges: hit ? resizeEdges(at: point) : SlipResizeEdges(), pointer: hit ? point : nil)
     }
 
     func sampleHoverCursor() {
         if isResizeDrag || draggingSplit { return }
+        if let hoverOverride {
+            updateResizeHighlight(at: hoverOverride, panelHit: true)
+            return
+        }
         guard let window, window.isVisible else {
-            resizeHighlight.edges = SlipResizeEdges()
+            resizeHighlight.update(edges: SlipResizeEdges(), pointer: nil)
             endHoverCursor()
             return
         }
@@ -1139,6 +1425,10 @@ final class SlipContentView: NSView {
         return super.hitTest(point)
     }
 
+    var currentLayout: SlipLayout {
+        SlipLayout(size: bounds.size, inset: SlipLayout.rim, gap: SlipLayout.paneGap)
+    }
+
     func hitKind(at point: NSPoint) -> String {
         if headerBackground(point) { return "header" }
         if !waveformPane.isHidden, waveformPane.frame.contains(point) { return "waveform" }
@@ -1147,7 +1437,7 @@ final class SlipContentView: NSView {
     }
 
     private func headerBackground(_ point: NSPoint) -> Bool {
-        guard point.y >= 0, point.y < 34, bounds.contains(point) else { return false }
+        guard point.y >= 0, point.y < SlipLayout.headerHeight, bounds.contains(point) else { return false }
         let controls = [playButton, volumeSlider, loopButton, gearButton]
         return !controls.contains { $0.frame.contains(point) }
     }
@@ -1277,9 +1567,7 @@ final class SlipContentView: NSView {
 
     private func updateSplit(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
-        let top: CGFloat = 35
-        let body = max(1, bounds.height - top)
-        applySplitDrag(rawFraction: (local.y - top) / body)
+        applySplitDrag(rawFraction: currentLayout.splitFraction(atY: local.y))
     }
 
     private func splitHit(_ point: NSPoint) -> Bool {
@@ -1298,22 +1586,31 @@ final class SlipContentView: NSView {
 
     func applyPalette() {
         palette = SlipPalette.current(effectiveAppearance)
-        layer?.backgroundColor = palette.background.cgColor
+        // On glass the system draws the panel; a background or border of our own would fight it.
+        layer?.backgroundColor = usesGlass ? nil : palette.background.cgColor
         layer?.borderColor = palette.line.cgColor
-        filenameLabel.textColor = palette.ink
-        metadataLabel.textColor = palette.muted
-        playButton.contentTintColor = palette.ink
-        gearButton.contentTintColor = palette.muted
-        loopButton.contentTintColor = loopButton.state == .on ? palette.head : palette.muted
-        volumeSlider.trackFillColor = palette.head
+        layer?.borderWidth = usesGlass ? 0 : 1
+        // Header text and icons use system colors so they stay legible on glass and follow Increase Contrast.
+        filenameLabel.textColor = .labelColor
+        metadataLabel.textColor = .secondaryLabelColor
+        playButton.contentTintColor = .labelColor
+        gearButton.contentTintColor = .secondaryLabelColor
+        loopButton.contentTintColor = loopButton.state == .on ? .controlAccentColor : .secondaryLabelColor
+        volumeSlider.trackFillColor = nil
         waveformPane.wantsLayer = true
         spectrogramPane.wantsLayer = true
-        spectrogramPane.clipsToBounds = true
-        spectrogramPane.layer?.masksToBounds = true
+        // The panes are solid cards with corners concentric to the panel's.
+        for pane in [waveformPane, spectrogramPane] {
+            pane.clipsToBounds = true
+            pane.layer?.masksToBounds = true
+            pane.layer?.cornerRadius = SlipLayout.paneRadius
+            pane.layer?.cornerCurve = .continuous
+        }
         divider.wantsLayer = true
         waveformPane.layer?.backgroundColor = palette.pane.cgColor
         spectrogramPane.layer?.backgroundColor = palette.pane.cgColor
-        divider.layer?.backgroundColor = palette.line.cgColor
+        // The gap between the cards shows the panel; the divider is only the split handle.
+        divider.layer?.backgroundColor = nil
         waveformPlayhead.wantsLayer = true
         spectrogramPlayhead.wantsLayer = true
         waveformPlayhead.layer?.backgroundColor = palette.head.cgColor
