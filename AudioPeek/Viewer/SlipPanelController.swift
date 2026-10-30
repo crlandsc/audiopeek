@@ -18,7 +18,7 @@ final class SlipWindow: NSPanel {
            let content = contentView as? SlipContentView,
            !content.isResizeDrag {
             let local = content.convert(event.locationInWindow, from: nil)
-            if SlipResize.edges(at: local, in: content.bounds).isActive {
+            if content.resizeEdges(at: local).isActive {
                 content.mouseDown(with: event)
                 return
             }
@@ -343,7 +343,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             appliedBlob = next
             return
         }
-        if let panel, let stored = next.windowFrame {
+        // Move the panel only when the stored frame itself changed. A resize or a
+        // move saves its frame a moment later, so any other setting written in
+        // between would otherwise put the panel back to the old frame.
+        if let panel, let stored = next.windowFrame, stored != previous.windowFrame {
             let rect = NSRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
             if abs(panel.frame.origin.x - rect.origin.x) > 0.5
                 || abs(panel.frame.origin.y - rect.origin.y) > 0.5
@@ -587,7 +590,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         content.filenameLabel.stringValue = url.lastPathComponent
         openGeneration += 1
         let generation = openGeneration
-        playback.stop()
+        playback.unload()
         DispatchQueue.global(qos: .userInitiated).async {
             let read = PlaybackController.readFile(at: url)
             DispatchQueue.main.async { [weak self] in
@@ -709,7 +712,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         openGeneration += 1
         gateTimer?.invalidate()
         gateTimer = nil
-        playback.stop()
+        playback.stopKeepingEngineWarm()
         content.setPlaying(false)
         content.setPlayhead(fraction: 0)
     }
@@ -793,7 +796,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func startPoll() {
         stopPoll()
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // A new Finder selection shows up within a quarter second. A read still
+        // in flight skips the next tick, so a slow Finder cannot pile reads up.
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.poll()
             }

@@ -277,7 +277,7 @@ final class Slice11Tests: XCTestCase {
         playback.stop()
     }
 
-    func testPauseStopsTheEngineAndPlayContinuesFromThere() throws {
+    func testPauseKeepsTheEngineWarmAndPlayContinuesFromThere() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-engine-\(UUID().uuidString).wav")
         try writeWav(to: url, frames: 44_100 * 4)
         defer { try? FileManager.default.removeItem(at: url) }
@@ -295,7 +295,7 @@ final class Slice11Tests: XCTestCase {
         XCTAssertGreaterThan(pausedAt, 0.2, playback.clockDescription)
         playback.toggle()
         XCTAssertFalse(playback.isPlaying)
-        XCTAssertFalse(playback.engine.isRunning)
+        XCTAssertTrue(playback.engine.isRunning)
         XCTAssertEqual(playback.position, pausedAt, accuracy: 0.15, playback.clockDescription)
         playback.toggle()
         XCTAssertTrue(playback.isPlaying)

@@ -34,6 +34,11 @@ final class PlaybackController {
     var onChange: () -> Void = {}
     var loopIsOn: () -> Bool = { false }
     var playbackAllowed: () -> Bool = { true }
+    /// How long the engine keeps running after a pause, a close, or the end of a
+    /// file. Starting a stopped engine waits on the audio device for about half a
+    /// second, so a resume or reopen inside this window plays right away.
+    var warmEngineTimeout: TimeInterval = 60
+    private var engineCooldown: DispatchWorkItem?
 
     init() {
         engine.attach(node)
@@ -66,7 +71,7 @@ final class PlaybackController {
     }
 
     func install(_ read: ReadAudio) {
-        stop()
+        unload()
         file = read.file
         duration = read.info.duration
         position = 0
@@ -83,7 +88,7 @@ final class PlaybackController {
     func toggle() {
         if isPlaying {
             userPaused = true
-            pauseEngine()
+            pause(stoppingEngine: false)
             return
         }
         if position >= duration - 0.01 {
@@ -139,7 +144,7 @@ final class PlaybackController {
     func applyGate(allows: Bool, pauseIfPlaying: Bool = true) {
         if !allows {
             if pauseIfPlaying, isPlaying {
-                pauseEngine()
+                pause(stoppingEngine: true)
             }
             return
         }
@@ -150,12 +155,22 @@ final class PlaybackController {
     }
 
     func stop() {
+        unload()
+        stopEngine()
+    }
+
+    /// Drops the current file and stops the engine once the warm window runs out.
+    func stopKeepingEngineWarm() {
+        unload()
+        coolEngineDown()
+    }
+
+    /// Drops the current file but leaves the engine running. Starting a stopped
+    /// engine waits on the audio device for about half a second, so switching
+    /// files this way lets the next file play right away.
+    func unload() {
         if node.isPlaying {
             node.stop()
-        }
-        if engine.isRunning {
-            engine.stop()
-            engineStopCount += 1
         }
         playGeneration += 1
         renderQueued = false
@@ -221,6 +236,7 @@ final class PlaybackController {
             node.stop()
         }
         clearClockAnchor()
+        coolEngineDown()
         onChange()
     }
 
@@ -249,6 +265,8 @@ final class PlaybackController {
         origin = Double(startFrame) / rate
         playGeneration += 1
         let generation = playGeneration
+        engineCooldown?.cancel()
+        engineCooldown = nil
         do {
             if !engine.isRunning {
                 try engine.start()
@@ -308,7 +326,7 @@ final class PlaybackController {
         onChange()
     }
 
-    private func pauseEngine() {
+    private func pause(stoppingEngine: Bool) {
         renderQueued = false
         refreshPosition()
         playGeneration += 1
@@ -316,10 +334,32 @@ final class PlaybackController {
             node.pause()
         }
         isPlaying = false
+        if stoppingEngine {
+            stopEngine()
+        } else {
+            coolEngineDown()
+        }
+        onChange()
+    }
+
+    private func coolEngineDown() {
+        engineCooldown?.cancel()
+        engineCooldown = nil
+        guard engine.isRunning else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isPlaying, !self.scrubbing else { return }
+            self.stopEngine()
+        }
+        engineCooldown = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + warmEngineTimeout, execute: work)
+    }
+
+    private func stopEngine() {
+        engineCooldown?.cancel()
+        engineCooldown = nil
         if engine.isRunning {
             engine.stop()
             engineStopCount += 1
         }
-        onChange()
     }
 }

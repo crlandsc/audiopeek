@@ -96,7 +96,8 @@ enum SlipSystemCursors {
 }
 
 enum SlipResize {
-    static let margin: CGFloat = 8
+    static let margin: CGFloat = 10
+    static let cornerLength: CGFloat = 20
 
     static func edges(at point: NSPoint, in bounds: NSRect) -> SlipResizeEdges {
         guard bounds.width > 0, bounds.height > 0 else { return SlipResizeEdges() }
@@ -120,6 +121,23 @@ enum SlipResize {
                 bottom = false
             } else {
                 top = false
+            }
+        }
+        // The last stretch of a band before a corner resizes both ways, so a
+        // corner is an easy target rather than the small square where two
+        // bands overlap.
+        if (left || right) && !top && !bottom {
+            if point.y <= bounds.minY + cornerLength {
+                top = true
+            } else if point.y >= bounds.maxY - cornerLength {
+                bottom = true
+            }
+        }
+        if (top || bottom) && !left && !right {
+            if point.x <= bounds.minX + cornerLength {
+                left = true
+            } else if point.x >= bounds.maxX - cornerLength {
+                right = true
             }
         }
         return SlipResizeEdges(left: left, right: right, top: top, bottom: bottom)
@@ -152,6 +170,69 @@ enum SlipResize {
             frame.size.height = height
         }
         return frame
+    }
+}
+
+/// An accent line along the resize edge or corner under the pointer. Finder
+/// ignores cursor changes from AudioPeek while Finder is front, so this is the
+/// hint that shows where the panel can be grabbed.
+final class SlipResizeHighlight: NSView {
+    var edges = SlipResizeEdges() {
+        didSet {
+            if edges != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
+    var cornerRadius: CGFloat = 10
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard edges.isActive else { return }
+        let line: CGFloat = 3
+        let isCorner = (edges.left || edges.right) && (edges.top || edges.bottom)
+        let reach = isCorner ? SlipResize.cornerLength * 2 : SlipResize.margin
+        var region = bounds
+        if edges.left {
+            region.size.width = reach
+        }
+        if edges.right {
+            region.origin.x = bounds.maxX - reach
+            region.size.width = reach
+        }
+        if edges.top {
+            region.size.height = reach
+        }
+        if edges.bottom {
+            region.origin.y = bounds.maxY - reach
+            region.size.height = reach
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: region).addClip()
+        let inset = line / 2
+        let path = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: inset, dy: inset),
+            xRadius: max(0, cornerRadius - inset),
+            yRadius: max(0, cornerRadius - inset)
+        )
+        path.lineWidth = line
+        NSColor.controlAccentColor.withAlphaComponent(0.85).setStroke()
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
@@ -638,6 +719,7 @@ final class SlipContentView: NSView {
     let waveformPlayhead = NSView()
     let spectrogramPlayhead = NSView()
     let progressFill = NSView()
+    let resizeHighlight = SlipResizeHighlight()
 
     var onPlay: () -> Void = {}
     var onVolume: (Double) -> Void = { _ in }
@@ -734,7 +816,7 @@ final class SlipContentView: NSView {
         progressFill.isHidden = true
         progressFill.setAccessibilityIdentifier("slip.progress")
 
-        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, loopButton, gearButton, waveformPane, spectrogramPane, divider, progressFill] {
+        for view in [playButton, filenameLabel, metadataLabel, volumeSlider, loopButton, gearButton, waveformPane, spectrogramPane, divider, progressFill, resizeHighlight] {
             addSubview(view)
         }
         waveformPane.addSubview(waveformPlayhead)
@@ -850,6 +932,8 @@ final class SlipContentView: NSView {
         }
         placePlayhead(waveformPlayhead, in: waveformPane)
         placePlayhead(spectrogramPlayhead, in: spectrogramPane)
+        resizeHighlight.frame = bounds
+        resizeHighlight.cornerRadius = layer?.cornerRadius ?? 10
     }
 
     private func placePlayhead(_ playhead: NSView, in pane: NSView) {
@@ -932,17 +1016,27 @@ final class SlipContentView: NSView {
         super.resetCursorRects()
         discardCursorRects()
         let margin = SlipResize.margin
+        let corner = SlipResize.cornerLength
         let width = bounds.width
         let height = bounds.height
-        guard width > margin * 2, height > margin * 2 else { return }
-        addCursorRect(NSRect(x: margin, y: 0, width: width - margin * 2, height: margin), cursor: .resizeUpDown)
-        addCursorRect(NSRect(x: margin, y: height - margin, width: width - margin * 2, height: margin), cursor: .resizeUpDown)
-        addCursorRect(NSRect(x: 0, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
-        addCursorRect(NSRect(x: width - margin, y: margin, width: margin, height: height - margin * 2), cursor: .resizeLeftRight)
-        addCursorRect(NSRect(x: 0, y: 0, width: margin, height: margin), cursor: SlipResizeAxis.upLeftCursor)
-        addCursorRect(NSRect(x: width - margin, y: 0, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
-        addCursorRect(NSRect(x: 0, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upRightCursor)
-        addCursorRect(NSRect(x: width - margin, y: height - margin, width: margin, height: margin), cursor: SlipResizeAxis.upLeftCursor)
+        guard width > corner * 2, height > corner * 2 else { return }
+        addCursorRect(NSRect(x: corner, y: 0, width: width - corner * 2, height: margin), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: corner, y: height - margin, width: width - corner * 2, height: margin), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: 0, y: corner, width: margin, height: height - corner * 2), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: width - margin, y: corner, width: margin, height: height - corner * 2), cursor: .resizeLeftRight)
+        // Each corner is an L: the last stretch of the two bands that meet there.
+        let corners: [(x: CGFloat, y: CGFloat, cursor: NSCursor)] = [
+            (0, 0, SlipResizeAxis.upLeftCursor),
+            (width - corner, 0, SlipResizeAxis.upRightCursor),
+            (0, height - corner, SlipResizeAxis.upRightCursor),
+            (width - corner, height - corner, SlipResizeAxis.upLeftCursor)
+        ]
+        for spot in corners {
+            let bandY = spot.y == 0 ? 0 : height - margin
+            let bandX = spot.x == 0 ? 0 : width - margin
+            addCursorRect(NSRect(x: spot.x, y: bandY, width: corner, height: margin), cursor: spot.cursor)
+            addCursorRect(NSRect(x: bandX, y: spot.y, width: margin, height: corner), cursor: spot.cursor)
+        }
         if !divider.isHidden, divider.frame.width > margin * 2, divider.frame.height > 0 {
             let hit = divider.frame.insetBy(dx: margin, dy: -6)
             if hit.width > 0, hit.height > 0 {
@@ -960,11 +1054,21 @@ final class SlipContentView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        resizeHighlight.edges = SlipResizeEdges()
         endHoverCursor()
     }
 
+    /// Resize edges at a point, except over a header control that reaches into a band.
+    func resizeEdges(at point: NSPoint) -> SlipResizeEdges {
+        let controls = [playButton, volumeSlider, loopButton, gearButton]
+        if controls.contains(where: { !$0.isHidden && $0.frame.contains(point) }) {
+            return SlipResizeEdges()
+        }
+        return SlipResize.edges(at: point, in: bounds)
+    }
+
     func resizeCursor(at point: NSPoint) -> NSCursor? {
-        if let cursor = SlipResize.edges(at: point, in: bounds).axis?.cursor {
+        if let cursor = resizeEdges(at: point).axis?.cursor {
             return cursor
         }
         if splitHit(point) {
@@ -978,9 +1082,16 @@ final class SlipContentView: NSView {
         return resizeCursor(at: point) ?? .arrow
     }
 
+    /// Shows the grab zone under the pointer. Unlike the cursor, this works
+    /// while Finder is the front app.
+    func updateResizeHighlight(at point: NSPoint, panelHit: Bool) {
+        resizeHighlight.edges = panelHit && containsPointer(point) ? resizeEdges(at: point) : SlipResizeEdges()
+    }
+
     func sampleHoverCursor() {
         if isResizeDrag || draggingSplit { return }
         guard let window, window.isVisible else {
+            resizeHighlight.edges = SlipResizeEdges()
             endHoverCursor()
             return
         }
@@ -989,11 +1100,13 @@ final class SlipContentView: NSView {
         let panelHit = frame.contains(screen)
             || NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber
         let local = convert(window.convertPoint(fromScreen: screen), from: nil)
+        updateResizeHighlight(at: local, panelHit: panelHit)
         applyHoverCursor(hoverCursor(at: local, panelHit: panelHit))
     }
 
     func updateHoverCursor(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        updateResizeHighlight(at: point, panelHit: true)
         applyHoverCursor(hoverCursor(at: point, panelHit: true))
     }
 
@@ -1020,7 +1133,7 @@ final class SlipContentView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        if splitHit(local) || SlipResize.edges(at: local, in: bounds).isActive || headerBackground(local) {
+        if splitHit(local) || resizeEdges(at: local).isActive || headerBackground(local) {
             return self
         }
         return super.hitTest(point)
@@ -1054,7 +1167,7 @@ final class SlipContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
-        let edges = SlipResize.edges(at: local, in: bounds)
+        let edges = resizeEdges(at: local)
         if edges.isActive {
             resizeWindow(from: event, edges: edges)
             return
@@ -1111,11 +1224,13 @@ final class SlipContentView: NSView {
 
     private func resizeWindow(from event: NSEvent, edges: SlipResizeEdges) {
         guard let window, !isResizeDrag else { return }
+        // Measure the drag from where the button went down, so any movement
+        // before this handler runs still moves the edge.
+        let startFrame = window.frame
+        let startMouse = window.convertPoint(toScreen: event.locationInWindow)
         onResizeBegan()
         let cursor = edges.axis?.cursor
         cursor?.set()
-        let startFrame = window.frame
-        let startMouse = NSEvent.mouseLocation
         let minSize = window.minSize
         var ended = false
         window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: NSEvent.foreverDuration, mode: .eventTracking) { event, stop in
@@ -1545,21 +1660,25 @@ final class SlipPaneView: NSView {
             let count = min(lane.count, columnCount)
             guard count > 0 else { continue }
             let y0 = CGFloat(index) * (laneHeight + gap)
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: 0, y: yPosition(lane[0].maximum, y0: y0, height: laneHeight)))
+            // A CGPath, not an NSBezierPath: stroking this many-point outline
+            // through NSBezierPath ran about 30 times slower on the main thread.
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: yPosition(lane[0].maximum, y0: y0, height: laneHeight)))
             for column in 0..<count {
-                path.line(to: NSPoint(x: slot * CGFloat(column), y: yPosition(lane[column].maximum, y0: y0, height: laneHeight)))
+                path.addLine(to: CGPoint(x: slot * CGFloat(column), y: yPosition(lane[column].maximum, y0: y0, height: laneHeight)))
             }
-            path.line(to: NSPoint(x: slot * CGFloat(count), y: yPosition(lane[count - 1].maximum, y0: y0, height: laneHeight)))
+            path.addLine(to: CGPoint(x: slot * CGFloat(count), y: yPosition(lane[count - 1].maximum, y0: y0, height: laneHeight)))
             for column in stride(from: count - 1, through: 0, by: -1) {
-                path.line(to: NSPoint(x: slot * CGFloat(column), y: yPosition(lane[column].minimum, y0: y0, height: laneHeight)))
+                path.addLine(to: CGPoint(x: slot * CGFloat(column), y: yPosition(lane[column].minimum, y0: y0, height: laneHeight)))
             }
-            path.close()
-            color.withAlphaComponent(0.72).setFill()
-            path.fill()
-            color.setStroke()
-            path.lineWidth = 1
-            path.stroke()
+            path.closeSubpath()
+            ctx.addPath(path)
+            ctx.setFillColor(color.withAlphaComponent(0.72).cgColor)
+            ctx.fillPath()
+            ctx.addPath(path)
+            ctx.setStrokeColor(color.cgColor)
+            ctx.setLineWidth(1)
+            ctx.strokePath()
             if amplitude == .linear {
                 let mid = NSBezierPath()
                 let y = y0 + laneHeight / 2

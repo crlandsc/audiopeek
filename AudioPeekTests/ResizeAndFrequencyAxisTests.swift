@@ -24,6 +24,45 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         XCTAssertFalse(SlipResize.edges(at: NSPoint(x: 430, y: 250), in: view.bounds).isActive)
     }
 
+    func testResizeZonesHaveRoomyCornersAndLeaveHeaderButtonsClickable() {
+        let view = SlipContentView(frame: NSRect(x: 0, y: 0, width: 1580, height: 644))
+        view.layout()
+        let bounds = view.bounds
+        // The corner grab that landed 1.4 pt outside the old 8 pt right band.
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1570.6, y: 640), in: bounds), SlipResizeEdges(right: true, bottom: true))
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1575, y: 630), in: bounds), SlipResizeEdges(right: true, bottom: true))
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1560, y: 640), in: bounds), SlipResizeEdges(right: true, bottom: true))
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1575, y: 300), in: bounds), SlipResizeEdges(right: true))
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 9, y: 300), in: bounds), SlipResizeEdges(left: true))
+        XCTAssertFalse(SlipResize.edges(at: NSPoint(x: 11, y: 300), in: bounds).isActive)
+        for control in [view.playButton, view.gearButton] {
+            let point = NSPoint(x: control.frame.midX, y: control.frame.minY + 1)
+            XCTAssertTrue(SlipResize.edges(at: point, in: bounds).isActive)
+            XCTAssertFalse(view.resizeEdges(at: point).isActive)
+            XCTAssertNil(view.resizeCursor(at: point))
+        }
+    }
+
+    func testHoverHighlightsTheGrabZoneEvenWhileAnotherAppIsFront() {
+        let view = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
+        view.layout()
+        XCTAssertEqual(view.resizeHighlight.frame, view.bounds)
+        let checks: [(NSPoint, Bool, SlipResizeEdges)] = [
+            (NSPoint(x: 856, y: 250), true, SlipResizeEdges(right: true)),
+            (NSPoint(x: 856, y: 490), true, SlipResizeEdges(right: true, bottom: true)),
+            (NSPoint(x: 430, y: 250), true, SlipResizeEdges()),
+            (NSPoint(x: 856, y: 250), false, SlipResizeEdges()),
+            (NSPoint(x: view.playButton.frame.midX, y: view.playButton.frame.minY + 1), true, SlipResizeEdges())
+        ]
+        for (point, panelHit, edges) in checks {
+            view.updateResizeHighlight(at: point, panelHit: panelHit)
+            XCTAssertEqual(view.resizeHighlight.edges, edges, "\(point) panelHit=\(panelHit)")
+        }
+        view.updateResizeHighlight(at: NSPoint(x: 3, y: 250), panelHit: true)
+        XCTAssertFalse(view.hitTest(NSPoint(x: 3, y: 250)) === view.resizeHighlight)
+        XCTAssertFalse(view.resizeHighlight.isAccessibilityElement())
+    }
+
     func testResizeFrameFollowsEachEdgeOnce() {
         let start = NSRect(x: 100, y: 200, width: 860, height: 500)
         let minSize = NSSize(width: 420, height: 280)
@@ -204,6 +243,33 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         XCTAssertEqual(slip.overviewStartCount, beforeTime)
     }
 
+    func testASettingsChangeRightAfterAResizeKeepsTheNewSize() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-snap-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 44_100 * 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let slip = makeSlip()
+        let store = try XCTUnwrap(slipStore)
+        store.onChange = { [weak slip] in slip?.applySettings() }
+        slip.setInjectedLoad(thermal: "nominal", cpu: 0.1, applyNow: false)
+        slip.openFiles([url])
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, slip.panelsMade == 0 {
+            CFRunLoopRunInMode(.defaultMode, 0.05, false)
+        }
+        let start = slip.frame
+        slip.beginResizeInteraction()
+        slip.resizePanelForTest(NSRect(x: start.origin.x, y: start.origin.y, width: start.width + 300, height: start.height))
+        slip.endResizeInteraction()
+        store.update { $0.loopEnabled.toggle() }
+        XCTAssertEqual(slip.frame.width, start.width + 300, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(store.blob.windowFrame).width, start.width, accuracy: 0.5)
+
+        store.update {
+            $0.windowFrame = StoredWindowFrame(x: start.origin.x, y: start.origin.y, width: 700, height: 400)
+        }
+        XCTAssertEqual(slip.frame.width, 700, accuracy: 0.5)
+    }
+
     func testResizeDragStretchesASnapshotUntilMouseUp() {
         let pane = SlipPaneView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         let window = NSWindow(
@@ -228,6 +294,36 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         XCTAssertFalse(pane.isStretching)
         XCTAssertFalse(pane.hasStretchSnapshot)
         XCTAssertNil(pane.layer?.contents)
+        pane.displayIfNeeded()
+        XCTAssertGreaterThan(pane.drawCount, drawn)
+    }
+
+    func testStretchOnScreenUsesAnImageThatScalesWithThePane() throws {
+        let pane = SlipPaneView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
+        let window = NSWindow(
+            contentRect: pane.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = pane
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        pane.displayIfNeeded()
+        CFRunLoopRunInMode(.defaultMode, 0.1, false)
+        XCTAssertNotNil(pane.layer?.contents)
+        // AppKit's own backing store does not scale when the pane grows, which
+        // showed a gray box. The stretch has to hold a plain image.
+        pane.beginStretch()
+        let contents = try XCTUnwrap(pane.layer?.contents)
+        XCTAssertEqual(CFGetTypeID(contents as CFTypeRef), CGImage.typeID)
+        XCTAssertEqual(pane.layer?.contentsGravity, .resize)
+        let drawn = pane.drawCount
+        pane.setFrameSize(NSSize(width: 480, height: 200))
+        pane.displayIfNeeded()
+        XCTAssertEqual(pane.drawCount, drawn)
+        XCTAssertTrue(pane.layer?.contents as AnyObject === contents as AnyObject)
+        pane.endStretch()
         pane.displayIfNeeded()
         XCTAssertGreaterThan(pane.drawCount, drawn)
     }
@@ -597,6 +693,100 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         for label in labels {
             XCTAssertFalse(label.insetBy(dx: -AxisMarkLayout.gap, dy: -AxisMarkLayout.gap).intersects(unit))
         }
+    }
+
+    func testSwitchingFilesKeepsTheAudioEngineRunning() throws {
+        let first = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-switch-a-\(UUID().uuidString).wav")
+        let second = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-switch-b-\(UUID().uuidString).wav")
+        try writeWav(to: first, frames: 44_100 * 2)
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+        buffer.frameLength = 48_000
+        try AVAudioFile(forWriting: second, settings: format.settings).write(from: buffer)
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+        let playback = PlaybackController()
+        playback.setGain(0)
+        XCTAssertNotNil(playback.open(url: first))
+        playback.toggle()
+        XCTAssertTrue(playback.isPlaying)
+        XCTAssertTrue(playback.engine.isRunning)
+        let stops = playback.engineStopCount
+
+        playback.unload()
+        playback.install(try XCTUnwrap(PlaybackController.readFile(at: second)))
+        XCTAssertTrue(playback.engine.isRunning)
+        playback.applyGate(allows: true)
+        XCTAssertTrue(playback.isPlaying)
+        XCTAssertEqual(playback.engineStopCount, stops)
+
+        playback.stop()
+        XCTAssertFalse(playback.engine.isRunning)
+    }
+
+    func testPauseCloseAndTheEndOfAFileKeepTheEngineWarmBriefly() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-warm-\(UUID().uuidString).wav")
+        let short = FileManager.default.temporaryDirectory.appendingPathComponent("audiopeek-warm-short-\(UUID().uuidString).wav")
+        try writeWav(to: url, frames: 44_100 * 4)
+        try writeWav(to: short, frames: 44_100 / 4)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: short)
+        }
+        func wait(_ seconds: TimeInterval) {
+            RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+        }
+        let playback = PlaybackController()
+        playback.warmEngineTimeout = 0.3
+        playback.setGain(0)
+        XCTAssertNotNil(playback.open(url: url))
+        playback.toggle()
+        XCTAssertTrue(playback.engine.isRunning)
+        let stops = playback.engineStopCount
+
+        // A pause keeps the engine running, so playing again inside the window starts warm.
+        playback.toggle()
+        XCTAssertFalse(playback.isPlaying)
+        XCTAssertTrue(playback.engine.isRunning)
+        wait(0.1)
+        playback.toggle()
+        XCTAssertTrue(playback.isPlaying)
+        wait(0.5)
+        XCTAssertTrue(playback.engine.isRunning)
+        XCTAssertEqual(playback.engineStopCount, stops)
+
+        // Left paused, the engine stops once the window runs out.
+        playback.toggle()
+        wait(0.5)
+        XCTAssertFalse(playback.engine.isRunning)
+        XCTAssertEqual(playback.engineStopCount, stops + 1)
+
+        // Closing the panel works the same way.
+        playback.toggle()
+        XCTAssertTrue(playback.engine.isRunning)
+        playback.stopKeepingEngineWarm()
+        XCTAssertFalse(playback.isPlaying)
+        XCTAssertTrue(playback.engine.isRunning)
+        wait(0.5)
+        XCTAssertFalse(playback.engine.isRunning)
+
+        // So does a file that plays to its end.
+        let ending = PlaybackController()
+        ending.warmEngineTimeout = 0.3
+        ending.setGain(0)
+        XCTAssertNotNil(ending.open(url: short))
+        ending.toggle()
+        let started = Date()
+        while ending.isPlaying, Date().timeIntervalSince(started) < 2 {
+            wait(0.05)
+            ending.refreshPosition()
+        }
+        XCTAssertFalse(ending.isPlaying)
+        XCTAssertTrue(ending.engine.isRunning)
+        wait(0.5)
+        XCTAssertFalse(ending.engine.isRunning)
     }
 
     func testPlayingSeekDoesNotStopTheEngineBeforeScheduling() throws {

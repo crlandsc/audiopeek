@@ -297,10 +297,10 @@ Check.expect(state["previewSpaceRegistered"]?.bool == true, "space toggles play 
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
 Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback")
-Check.expect(state["audioEngineRunning"]?.bool == false, "space stops the audio engine")
+Check.expect(state["audioEngineRunning"]?.bool == true, "space keeps the audio engine warm while paused")
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
-Check.expect(state["audioEngineRunning"]?.bool == true, "space starts the audio engine")
+Check.expect(state["audioEngineRunning"]?.bool == true, "space resumes on the warm audio engine")
 Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback")
 
 state = command("setFrontApp", extra: ["bundleID": "com.apple.Safari"])
@@ -313,10 +313,10 @@ Check.expect(state["previewSpaceRegistered"]?.bool == true, "space is registered
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == false } ?? state
 Check.expect(state["playbackRunning"]?.bool == false, "space pauses playback again")
-Check.expect(state["audioEngineRunning"]?.bool == false, "space stops the audio engine again")
+Check.expect(state["audioEngineRunning"]?.bool == true, "space keeps the audio engine warm while paused again")
 state = command("dispatchPreviewSpace")
 state = waitUntil(at: stateURL, timeout: 2) { $0["playbackRunning"]?.bool == true } ?? state
-Check.expect(state["audioEngineRunning"]?.bool == true, "space starts the audio engine again")
+Check.expect(state["audioEngineRunning"]?.bool == true, "space resumes on the warm audio engine again")
 Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback again")
 
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
