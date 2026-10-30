@@ -78,7 +78,7 @@ final class SettingsPaneTests: XCTestCase {
         // (SwiftUI-only identifiers need a live accessibility client, so these use AppKit-backed controls.)
         let labels = controller.controlLabels()
         XCTAssertTrue(labels.contains("waveform.colorWell"), "Waveform pane missing from \(labels)")
-        XCTAssertTrue(labels.contains("2,048"), "Spectrogram pane's n_fft field missing from \(labels)")
+        XCTAssertTrue(labels.contains("Linear"), "Waveform pane's amplitude control missing from \(labels)")
         NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
     }
 
@@ -93,6 +93,34 @@ final class SettingsPaneTests: XCTestCase {
         settle()
         XCTAssertLessThan(controller.frame.height, before, "the window shrinks when the warning goes away")
         NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+    }
+
+    func testEachTabResetsOnlyItsOwnSettings() {
+        let (_, store) = makeController()
+        store.update {
+            $0.showDockIcon = true
+            $0.waveformDual = false
+            $0.waveformAmplitude = .decibels
+            $0.waveformColor = WaveformColor(usesSystemBlue: false, red: 1, green: 0, blue: 0, alpha: 1)
+            $0.spectrogramDual = true
+            $0.spectrogram.nFFT = 1024
+            $0.spectrogram.colorMap = .gray
+            $0.showFrequencyAxis = true
+        }
+        store.resetWaveformSettings()
+        let factory = SettingsBlob.factory
+        XCTAssertEqual(store.blob.waveformDual, factory.waveformDual)
+        XCTAssertEqual(store.blob.waveformAmplitude, factory.waveformAmplitude)
+        XCTAssertEqual(store.blob.waveformColor, factory.waveformColor)
+        XCTAssertTrue(store.blob.spectrogramDual, "the Waveform reset leaves the Spectrogram tab alone")
+        XCTAssertEqual(store.blob.spectrogram.nFFT, 1024)
+        XCTAssertTrue(store.blob.showDockIcon, "the Waveform reset leaves General alone")
+
+        store.resetSpectrogramSettings()
+        XCTAssertEqual(store.blob.spectrogram, factory.spectrogram)
+        XCTAssertEqual(store.blob.spectrogramDual, factory.spectrogramDual)
+        XCTAssertEqual(store.blob.showFrequencyAxis, factory.showFrequencyAxis)
+        XCTAssertTrue(store.blob.showDockIcon, "the Spectrogram reset leaves General alone")
     }
 
     func testAnEditSurvivesSwitchingPanes() {

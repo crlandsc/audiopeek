@@ -114,6 +114,27 @@ final class SettingsStore: ObservableObject {
         lastLoginErrorCode = errorCode
     }
 
+    /// Restores only the settings on the Waveform tab.
+    func resetWaveformSettings() {
+        let factory = SettingsBlob.factory
+        update {
+            $0.waveformDual = factory.waveformDual
+            $0.waveformAmplitude = factory.waveformAmplitude
+            $0.waveformColor = factory.waveformColor
+        }
+    }
+
+    /// Restores only the settings on the Spectrogram tab.
+    func resetSpectrogramSettings() {
+        let factory = SettingsBlob.factory
+        update {
+            $0.spectrogramDual = factory.spectrogramDual
+            $0.spectrogram = factory.spectrogram
+            $0.showFrequencyAxis = factory.showFrequencyAxis
+            $0.showTimeAxis = factory.showTimeAxis
+        }
+    }
+
     @discardableResult
     func resetKnobs() -> Bool {
         let wasEnabled = blob.loginItemEnabled

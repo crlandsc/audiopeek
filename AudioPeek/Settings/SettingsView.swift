@@ -86,9 +86,11 @@ private struct PaneHeightKey: PreferenceKey {
     }
 }
 
-private struct GeneralPane: View {
+struct GeneralPane: View {
     @ObservedObject var store: SettingsStore
     let actions: SettingsActions
+    /// Advanced starts collapsed; most people never need it.
+    @State var advancedExpanded = false
 
     var body: some View {
         Form {
@@ -113,22 +115,8 @@ private struct GeneralPane: View {
                     get: { store.blob.loginItemEnabled },
                     set: { actions.onLoginToggle($0) }
                 ))
-                if store.loginPresentation.offersLoginItems {
-                    Text(store.loginPresentation.message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("login.manualMessage")
-                    Button(store.loginPresentation.buttonTitle) {
-                        actions.onOpenLoginItems()
-                    }
-                    .accessibilityIdentifier("login.openButton")
-                }
-                if store.loginPresentation.showsRegistered {
-                    Text(store.loginPresentation.message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("login.registered")
+                LoginItemsRow(presentation: store.loginPresentation) {
+                    actions.onOpenLoginItems()
                 }
                 Toggle("Show menu bar icon", isOn: store.binding(\.showStatusItem))
                 Toggle("Show Dock icon", isOn: store.binding(\.showDockIcon))
@@ -163,19 +151,20 @@ private struct GeneralPane: View {
                 Text("Waveform on top, spectrogram below. The middle is 50/50.")
             }
 
-            Section("Advanced") {
+            Section(isExpanded: $advancedExpanded) {
                 Toggle(isOn: store.binding(\.staticOverview)) {
                     Text("Full detail")
                     Text("Reads every sample for the waveform and spectrogram. Leave it off and files longer than 30 seconds use a coarser picture.")
                 }
-            }
-
-            Section {
-                HStack {
-                    Spacer()
-                    Button("Reset to Defaults") { actions.onReset() }
-                        .accessibilityIdentifier("settings.reset")
+                ResetRow(
+                    title: "Reset All Settings",
+                    detail: "Restores every setting on the General, Waveform and Spectrogram tabs to its default, including the hotkey and the login item. The volume and the preview's size and position stay as they are.",
+                    identifier: "settings.reset"
+                ) {
+                    actions.onReset()
                 }
+            } header: {
+                Text("Advanced")
             }
         }
     }
@@ -211,12 +200,24 @@ private struct WaveformPane: View {
                     .accessibilityIdentifier("waveform.colorWell")
                 }
             }
+
+            Section {
+                ResetRow(
+                    title: "Reset Waveform Settings",
+                    detail: "Restores only the settings on this tab.",
+                    identifier: "settings.resetWaveform"
+                ) {
+                    store.resetWaveformSettings()
+                }
+            }
         }
     }
 }
 
-private struct SpectrogramPane: View {
+struct SpectrogramPane: View {
     @ObservedObject var store: SettingsStore
+    /// Advanced starts collapsed; most people never need it.
+    @State var advancedExpanded = false
 
     var body: some View {
         Form {
@@ -243,7 +244,7 @@ private struct SpectrogramPane: View {
                 Text("Frequencies along the left of the spectrogram, from 20 up to Nyquist. Time runs along the bottom of the preview. Both start off.")
             }
 
-            Section {
+            Section(isExpanded: $advancedExpanded) {
                 IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT), range: 64...32768, doubles: true)
                 IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop), range: 16...8192, doubles: true)
                 Picker("Window", selection: store.binding(\.spectrogram.window)) {
@@ -255,6 +256,7 @@ private struct SpectrogramPane: View {
                 DoubleField(title: "fmin", value: store.binding(\.spectrogram.fmin), range: 0...20000, step: 10)
                 HertzField(
                     title: "fmax",
+                    caption: "Blank uses the file's Nyquist.",
                     placeholder: "Nyquist",
                     value: store.blob.spectrogram.fmax
                 ) { store.setFMax($0) }
@@ -262,10 +264,69 @@ private struct SpectrogramPane: View {
                 DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor), range: -200...0, step: 5)
                 DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange), range: 10...200, step: 5)
             } header: {
-                Text("Analysis")
-            } footer: {
-                Text("Blank fmax uses the file's Nyquist.")
+                Text("Advanced")
             }
+
+            Section {
+                ResetRow(
+                    title: "Reset Spectrogram Settings",
+                    detail: "Restores only the settings on this tab, including Advanced.",
+                    identifier: "settings.resetSpectrogram"
+                ) {
+                    store.resetSpectrogramSettings()
+                }
+            }
+        }
+    }
+}
+
+/// The login item's status and a shortcut to Login Items, in one row under the toggle.
+private struct LoginItemsRow: View {
+    let presentation: LoginPresentation
+    let onOpen: () -> Void
+
+    private var status: String {
+        presentation.message.isEmpty ? "Manage it in System Settings, Login Items." : presentation.message
+    }
+
+    private var statusIdentifier: String {
+        if presentation.offersLoginItems { return "login.manualMessage" }
+        if presentation.showsRegistered { return "login.registered" }
+        return "login.status"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(status)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(statusIdentifier)
+            Spacer(minLength: 0)
+            Button(presentation.buttonTitle.isEmpty ? "Open Login Items" : presentation.buttonTitle) {
+                onOpen()
+            }
+            .accessibilityIdentifier("login.openButton")
+        }
+    }
+}
+
+/// A reset button with a line saying exactly what it restores.
+private struct ResetRow: View {
+    let title: String
+    let detail: String
+    let identifier: String
+    let onReset: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(title) { onReset() }
+                .accessibilityIdentifier(identifier)
         }
     }
 }
@@ -321,6 +382,7 @@ private struct DoubleField: View {
 
 private struct HertzField: View {
     let title: String
+    let caption: String
     let placeholder: String
     let value: Double?
     let onCommit: (Double?) -> Void
@@ -328,7 +390,7 @@ private struct HertzField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        LabeledContent(title) {
+        LabeledContent {
             TextField(title, text: $text, prompt: Text(placeholder))
                 .labelsHidden()
                 .textFieldStyle(.roundedBorder)
@@ -345,6 +407,9 @@ private struct HertzField: View {
                         text = Self.render(newValue)
                     }
                 }
+        } label: {
+            Text(title)
+            Text(caption)
         }
     }
 
