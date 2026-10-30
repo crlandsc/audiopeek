@@ -129,6 +129,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.toolbarStyle = .preference
+        // Same level as the floating preview, so Settings opens in front of it instead of behind.
+        window.level = .floating
         // No autosave names: a test instance would otherwise write them into the real app's defaults.
         let toolbar = NSToolbar(identifier: "AudioPeekSettings")
         toolbar.delegate = self

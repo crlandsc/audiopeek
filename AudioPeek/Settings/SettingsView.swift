@@ -163,6 +163,13 @@ private struct GeneralPane: View {
                 Text("Waveform on top, spectrogram below. The middle is 50/50.")
             }
 
+            Section("Advanced") {
+                Toggle(isOn: store.binding(\.staticOverview)) {
+                    Text("Full detail")
+                    Text("Reads every sample for the waveform and spectrogram. Leave it off and files longer than 30 seconds use a coarser picture.")
+                }
+            }
+
             Section {
                 HStack {
                     Spacer()
@@ -181,10 +188,6 @@ private struct WaveformPane: View {
         Form {
             Section("Display") {
                 Toggle("Dual view", isOn: store.binding(\.waveformDual))
-                Toggle(isOn: store.binding(\.staticOverview)) {
-                    Text("Full detail")
-                    Text("Reads every sample. Leave it off and files longer than 30 seconds use a coarser picture.")
-                }
                 Picker("Amplitude", selection: store.binding(\.waveformAmplitude)) {
                     Text("Linear").tag(WaveformAmplitude.linear)
                     Text("dB").tag(WaveformAmplitude.decibels)
@@ -241,23 +244,23 @@ private struct SpectrogramPane: View {
             }
 
             Section {
-                IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT))
-                IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop))
+                IntegerField(title: "n_fft", value: store.binding(\.spectrogram.nFFT), range: 64...32768, doubles: true)
+                IntegerField(title: "Hop", value: store.binding(\.spectrogram.hop), range: 16...8192, doubles: true)
                 Picker("Window", selection: store.binding(\.spectrogram.window)) {
                     Text("Hann").tag(FFTWindow.hann)
                     Text("Hamming").tag(FFTWindow.hamming)
                     Text("Blackman").tag(FFTWindow.blackman)
                 }
-                IntegerField(title: "n_mels", value: store.binding(\.spectrogram.nMels))
-                DoubleField(title: "fmin", value: store.binding(\.spectrogram.fmin))
+                IntegerField(title: "n_mels", value: store.binding(\.spectrogram.nMels), range: 8...512, step: 8)
+                DoubleField(title: "fmin", value: store.binding(\.spectrogram.fmin), range: 0...20000, step: 10)
                 HertzField(
                     title: "fmax",
                     placeholder: "Nyquist",
                     value: store.blob.spectrogram.fmax
                 ) { store.setFMax($0) }
                 Toggle("dB", isOn: store.binding(\.spectrogram.decibelsEnabled))
-                DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor))
-                DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange))
+                DoubleField(title: "dB floor", value: store.binding(\.spectrogram.dbFloor), range: -200...0, step: 5)
+                DoubleField(title: "dB range", value: store.binding(\.spectrogram.dbRange), range: 10...200, step: 5)
             } header: {
                 Text("Analysis")
             } footer: {
@@ -267,16 +270,30 @@ private struct SpectrogramPane: View {
     }
 }
 
+// Number fields are bordered boxes with stepper arrows, so they read as editable.
 private struct IntegerField: View {
     let title: String
     @Binding var value: Int
+    let range: ClosedRange<Int>
+    var step = 1
+    /// Step by doubling and halving, for sizes that are powers of two.
+    var doubles = false
 
     var body: some View {
         LabeledContent(title) {
-            TextField(title, value: $value, format: IntegerFormatStyle<Int>())
+            HStack(spacing: 4) {
+                TextField(title, value: $value, format: IntegerFormatStyle<Int>())
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                Stepper(title) {
+                    value = min(range.upperBound, doubles ? value * 2 : value + step)
+                } onDecrement: {
+                    value = max(range.lowerBound, doubles ? value / 2 : value - step)
+                }
                 .labelsHidden()
-                .multilineTextAlignment(.trailing)
-                .frame(width: 90)
+            }
         }
     }
 }
@@ -284,13 +301,20 @@ private struct IntegerField: View {
 private struct DoubleField: View {
     let title: String
     @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
 
     var body: some View {
         LabeledContent(title) {
-            TextField(title, value: $value, format: FloatingPointFormatStyle<Double>())
-                .labelsHidden()
-                .multilineTextAlignment(.trailing)
-                .frame(width: 90)
+            HStack(spacing: 4) {
+                TextField(title, value: $value, format: FloatingPointFormatStyle<Double>())
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                Stepper(title, value: $value, in: range, step: step)
+                    .labelsHidden()
+            }
         }
     }
 }
@@ -307,8 +331,11 @@ private struct HertzField: View {
         LabeledContent(title) {
             TextField(title, text: $text, prompt: Text(placeholder))
                 .labelsHidden()
+                .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
-                .frame(width: 90)
+                .frame(width: 80)
+                // Lines up with the stepped fields above and below.
+                .padding(.trailing, 19)
                 .focused($focused)
                 .onAppear { text = Self.render(value) }
                 .onSubmit { commit() }

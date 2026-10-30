@@ -41,6 +41,7 @@ final class SettingsPaneTests: XCTestCase {
         XCTAssertEqual(window?.toolbarStyle, .preference)
         XCTAssertEqual(window?.toolbar?.items.map(\.label), ["General", "Waveform", "Spectrogram"])
         XCTAssertFalse(window?.styleMask.contains(.resizable) ?? true)
+        XCTAssertEqual(window?.level, .floating, "Settings opens in front of the floating preview")
         for pane in SettingsPane.allCases {
             controller.select(pane, animate: false)
             XCTAssertEqual(controller.currentPane, pane)
