@@ -18,20 +18,22 @@ final class PlaywaveMarkTests: XCTestCase {
         XCTAssertEqual(PlaywaveMark.menuBarImage().size, NSSize(width: 18, height: 18))
         XCTAssertTrue(PlaywaveMark.menuBarImage().isTemplate)
 
-        let committed = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("../AudioPeek/Assets.xcassets/AppIcon.appiconset/icon_32x32@2x.png")
-        let bytes = try Data(contentsOf: committed)
-        let source = CGImageSourceCreateWithData(bytes as CFData, nil)
-        let fileImage = source.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
-        let saved = try XCTUnwrap(fileImage)
-        XCTAssertEqual(saved.width, 64)
-        XCTAssertEqual(saved.height, 64)
-        let fresh = PlaywaveMark.iconImage(side: 64)
-        let filed = redraw(saved, side: 64)
+        // Read the icon the host app ships, not the PNG in the repo. The repo can sit in a
+        // privacy-protected folder like Desktop, where the read waits on a hidden prompt.
+        let side = 128
+        let shipped = try XCTUnwrap(Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
+        let bytes = try Data(contentsOf: shipped)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData, nil))
+        let fileImage = (0..<CGImageSourceGetCount(source))
+            .compactMap { CGImageSourceCreateImageAtIndex(source, $0, nil) }
+            .first { $0.width == side }
+        let saved = try XCTUnwrap(fileImage, "no \(side) px image in AppIcon.icns")
+        XCTAssertEqual(saved.height, side)
+        let fresh = PlaywaveMark.iconImage(side: side)
+        let filed = redraw(saved, side: side)
         var mismatch: String?
-        compare: for y in 0..<64 {
-            for x in 0..<64 {
+        compare: for y in 0..<side {
+            for x in 0..<side {
                 let a = rgba(fresh, x: x, y: y)
                 let b = rgba(filed, x: x, y: y)
                 for channel in 0..<4 where abs(Int(a[channel]) - Int(b[channel])) > 1 {
