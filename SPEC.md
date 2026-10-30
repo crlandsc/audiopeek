@@ -180,7 +180,7 @@ The Carbon hotkey handler returns immediately. It does not wait on Finder, open,
 
 First show is 860 by 500 points, centered on the screen of the front Finder window. After that, remember the frame in the settings blob. A width change is a column-grid change: debounce the drag (mouse-up, or about 200 ms after the last change), then restart the overview once. Split height does not restart the pass.
 
-The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. No pane labels. No separate transport bar. Header order, as drawn: play/pause, filename, compact metadata, volume slider, loop, subtle settings gear. Metadata sits against the volume control and the filename truncates first. The gear opens the settings window.
+The panel is the Slip chrome: one compact header row, rounded panel, waveform above the spectrogram. No pane labels. No separate transport bar. Header order, as drawn: play/pause, filename, compact metadata, volume slider, loop, subtle settings gear. Metadata sits against the volume control and the filename truncates first; the play time never truncates. Header text and icons use the system label colors. The gear opens the settings window.
 
 Both panes start visible, split 50/50. The split is draggable and remembered. Hiding a pane gives the other the leftover height.
 
@@ -224,7 +224,7 @@ Follow the system appearance (`NSApp.effectiveAppearance` or equivalent), includ
 
 The factory spectrogram colors are magma. Settings can also use inferno, viridis, or gray. Changing colors redraws the current picture and does not start a new overview pass.
 
-The playhead is a 1 px vertical hairline on both panes. No grabber, no riding dot. Use the Slip playhead color from the prototype stylesheet (the volume slider accent uses that same color there).
+The playhead is a 1 px vertical hairline on both panes. No grabber, no riding dot. Use the Slip playhead color from the prototype stylesheet. The volume slider fill and the loop-on state use the system accent color instead, drawn by the app so they stay colored while the panel is not the key window.
 
 Waveform color defaults to `NSColor.systemBlue` (the standard light and dark system blues, not the user's accent color). A color well in the settings window can override it. Reset to default restores system blue.
 

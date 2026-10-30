@@ -698,6 +698,69 @@ final class MetadataCell: NSTextFieldCell {
     }
 }
 
+/// Panel geometry in the content view's flipped coordinates. Layout, hit testing and
+/// split dragging all read it, so they always agree.
+struct SlipLayout {
+    static let headerHeight: CGFloat = 46
+    static let minPane: CGFloat = 48
+
+    var size: NSSize
+    /// Glass rim between the panel edge and the panes, on the sides and bottom.
+    var inset: CGFloat = 0
+    /// Space between the two panes; the split handle sits in it.
+    var gap: CGFloat = 1
+
+    var bodyTop: CGFloat { Self.headerHeight + (inset == 0 ? 1 : 0) }
+
+    var body: NSRect {
+        NSRect(
+            x: inset,
+            y: bodyTop,
+            width: max(0, size.width - inset * 2),
+            height: max(0, size.height - bodyTop - inset)
+        )
+    }
+
+    func panes(waveform: Bool, spectrogram: Bool, split: Double) -> (wave: NSRect?, divider: NSRect?, spec: NSRect?) {
+        let body = self.body
+        guard waveform && spectrogram else {
+            return (waveform ? body : nil, nil, spectrogram ? body : nil)
+        }
+        let available = max(0, body.height - gap)
+        let waveHeight = min(max(available * CGFloat(split), Self.minPane), max(Self.minPane, available - Self.minPane))
+        let wave = NSRect(x: body.minX, y: body.minY, width: body.width, height: waveHeight)
+        let divider = NSRect(x: body.minX, y: wave.maxY, width: body.width, height: gap)
+        let spec = NSRect(x: body.minX, y: divider.maxY, width: body.width, height: max(0, body.maxY - divider.maxY))
+        return (wave, divider, spec)
+    }
+
+    /// The split fraction that puts the middle of the gap at `y`.
+    func splitFraction(atY y: CGFloat) -> Double {
+        let available = max(1, body.height - gap)
+        return Double((y - body.minY - gap / 2) / available)
+    }
+}
+
+/// Draws the volume track with the accent fill. The panel never becomes key, and the
+/// system draws a slider in a non-key window with a gray fill, ignoring trackFillColor.
+final class AccentSliderCell: NSSliderCell {
+    static let thickness: CGFloat = 4
+
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        let thickness = Self.thickness
+        let track = NSRect(x: rect.minX, y: rect.midY - thickness / 2, width: rect.width, height: thickness)
+        let radius = thickness / 2
+        NSColor.quaternaryLabelColor.setFill()
+        NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius).fill()
+        let knob = knobRect(flipped: flipped)
+        let fillEnd = min(max(knob.midX, track.minX), track.maxX)
+        guard fillEnd > track.minX else { return }
+        NSColor.controlAccentColor.setFill()
+        let filled = NSRect(x: track.minX, y: track.minY, width: fillEnd - track.minX, height: thickness)
+        NSBezierPath(roundedRect: filled, xRadius: radius, yRadius: radius).fill()
+    }
+}
+
 final class SlipContentView: NSView {
     let playButton = NSButton()
     let filenameLabel = NSTextField(labelWithString: "")
@@ -772,6 +835,7 @@ final class SlipContentView: NSView {
         metadataLabel.lineBreakMode = .byTruncatingTail
         metadataLabel.setAccessibilityIdentifier("slip.metadata")
 
+        volumeSlider.cell = AccentSliderCell()
         volumeSlider.controlSize = .small
         volumeSlider.minValue = 0
         volumeSlider.maxValue = 1
@@ -822,6 +886,18 @@ final class SlipContentView: NSView {
         waveformPane.addSubview(waveformPlayhead)
         spectrogramPane.addSubview(spectrogramPlayhead)
         applyPalette()
+        // Follow a change of the system accent color without a relaunch.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemColorsChanged),
+            name: NSColor.systemColorsDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func systemColorsChanged() {
+        volumeSlider.needsDisplay = true
+        loopButton.needsDisplay = true
     }
 
     required init?(coder: NSCoder) {
@@ -856,7 +932,7 @@ final class SlipContentView: NSView {
 
     func setLoop(_ enabled: Bool) {
         loopButton.state = enabled ? .on : .off
-        loopButton.contentTintColor = enabled ? palette.head : palette.muted
+        loopButton.contentTintColor = enabled ? .controlAccentColor : .secondaryLabelColor
     }
 
     func apply(showWaveform: Bool, showSpectrogram: Bool, split: Double, volume: Double) {
@@ -871,11 +947,12 @@ final class SlipContentView: NSView {
 
     override func layout() {
         super.layout()
-        let headerHeight: CGFloat = 34
+        let geometry = currentLayout
+        let headerHeight = SlipLayout.headerHeight
         let pad: CGFloat = 10
         let gap: CGFloat = 8
         let textGap: CGFloat = 12
-        let button: CGFloat = 24
+        let button: CGFloat = 28
         let volumeWidth: CGFloat = 72
         let midY = headerHeight / 2
         let buttonY = midY - button / 2
@@ -913,23 +990,11 @@ final class SlipContentView: NSView {
 
         waveformPane.isHidden = !showWaveform
         spectrogramPane.isHidden = !showSpectrogram
-        let both = showWaveform && showSpectrogram
-        divider.isHidden = !both
-        let top = headerHeight + 1
-        let body = max(0, bounds.height - top)
-        if both {
-            let dividerHeight: CGFloat = 1
-            let available = max(0, body - dividerHeight)
-            let waveHeight = min(max(available * splitFraction, 48), max(48, available - 48))
-            waveformPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: waveHeight)
-            divider.frame = NSRect(x: 0, y: top + waveHeight, width: bounds.width, height: dividerHeight)
-            let specY = top + waveHeight + dividerHeight
-            spectrogramPane.frame = NSRect(x: 0, y: specY, width: bounds.width, height: max(0, bounds.height - specY))
-        } else if showWaveform {
-            waveformPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: body)
-        } else if showSpectrogram {
-            spectrogramPane.frame = NSRect(x: 0, y: top, width: bounds.width, height: body)
-        }
+        let panes = geometry.panes(waveform: showWaveform, spectrogram: showSpectrogram, split: splitFraction)
+        divider.isHidden = panes.divider == nil
+        if let wave = panes.wave { waveformPane.frame = wave }
+        if let divide = panes.divider { divider.frame = divide }
+        if let spec = panes.spec { spectrogramPane.frame = spec }
         placePlayhead(waveformPlayhead, in: waveformPane)
         placePlayhead(spectrogramPlayhead, in: spectrogramPane)
         resizeHighlight.frame = bounds
@@ -1139,6 +1204,10 @@ final class SlipContentView: NSView {
         return super.hitTest(point)
     }
 
+    var currentLayout: SlipLayout {
+        SlipLayout(size: bounds.size)
+    }
+
     func hitKind(at point: NSPoint) -> String {
         if headerBackground(point) { return "header" }
         if !waveformPane.isHidden, waveformPane.frame.contains(point) { return "waveform" }
@@ -1147,7 +1216,7 @@ final class SlipContentView: NSView {
     }
 
     private func headerBackground(_ point: NSPoint) -> Bool {
-        guard point.y >= 0, point.y < 34, bounds.contains(point) else { return false }
+        guard point.y >= 0, point.y < SlipLayout.headerHeight, bounds.contains(point) else { return false }
         let controls = [playButton, volumeSlider, loopButton, gearButton]
         return !controls.contains { $0.frame.contains(point) }
     }
@@ -1277,9 +1346,7 @@ final class SlipContentView: NSView {
 
     private func updateSplit(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
-        let top: CGFloat = 35
-        let body = max(1, bounds.height - top)
-        applySplitDrag(rawFraction: (local.y - top) / body)
+        applySplitDrag(rawFraction: currentLayout.splitFraction(atY: local.y))
     }
 
     private func splitHit(_ point: NSPoint) -> Bool {
@@ -1300,12 +1367,13 @@ final class SlipContentView: NSView {
         palette = SlipPalette.current(effectiveAppearance)
         layer?.backgroundColor = palette.background.cgColor
         layer?.borderColor = palette.line.cgColor
-        filenameLabel.textColor = palette.ink
-        metadataLabel.textColor = palette.muted
-        playButton.contentTintColor = palette.ink
-        gearButton.contentTintColor = palette.muted
-        loopButton.contentTintColor = loopButton.state == .on ? palette.head : palette.muted
-        volumeSlider.trackFillColor = palette.head
+        // Header text and icons use system colors so they stay legible on glass and follow Increase Contrast.
+        filenameLabel.textColor = .labelColor
+        metadataLabel.textColor = .secondaryLabelColor
+        playButton.contentTintColor = .labelColor
+        gearButton.contentTintColor = .secondaryLabelColor
+        loopButton.contentTintColor = loopButton.state == .on ? .controlAccentColor : .secondaryLabelColor
+        volumeSlider.trackFillColor = nil
         waveformPane.wantsLayer = true
         spectrogramPane.wantsLayer = true
         spectrogramPane.clipsToBounds = true
