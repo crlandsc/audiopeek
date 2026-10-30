@@ -565,10 +565,70 @@ enum AxisLabelChrome {
     }
 }
 
+// Draws the metadata line so the trailing time ("0:06 / 84:40") always shows in full.
+// When space runs short, whole segments drop off the end of the format/rate/channel part instead.
+final class MetadataCell: NSTextFieldCell {
+    private static let separator = " · "
+
+    private var segments: [String] {
+        stringValue.components(separatedBy: Self.separator)
+    }
+
+    private var attributes: [NSAttributedString.Key: Any] {
+        [.font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize), .foregroundColor: textColor ?? .secondaryLabelColor]
+    }
+
+    private func textWidth(_ text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: attributes).width
+    }
+
+    private var padding: CGFloat {
+        cellSize(forBounds: NSRect(x: 0, y: 0, width: 10_000, height: 40)).width - textWidth(stringValue)
+    }
+
+    // The longest form of the line that fits: the full line, then fewer leading segments, then just the time.
+    private func shown(within textSpace: CGFloat) -> String {
+        let segments = self.segments
+        guard let time = segments.last, segments.count > 1, textWidth(stringValue) > textSpace + 0.5 else {
+            return stringValue
+        }
+        let info = segments.dropLast()
+        return (0..<info.count).reversed()
+            .map { (Array(info.prefix($0)) + [time]).joined(separator: Self.separator) }
+            .first { textWidth($0) <= textSpace } ?? time
+    }
+
+    // Cell width for the text shown within `maxWidth`, never narrower than the time itself.
+    func fittingWidth(within maxWidth: CGFloat) -> CGFloat {
+        guard !stringValue.isEmpty else { return 0 }
+        let padding = self.padding
+        return ceil(textWidth(shown(within: maxWidth - padding)) + padding)
+    }
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        let rect = titleRect(forBounds: cellFrame)
+        let text = shown(within: rect.width)
+        guard text != stringValue else {
+            super.drawInterior(withFrame: cellFrame, in: controlView)
+            return
+        }
+        let width = textWidth(text)
+        (text as NSString).draw(at: NSPoint(x: rect.maxX - width, y: rect.minY), withAttributes: attributes)
+    }
+}
+
 final class SlipContentView: NSView {
     let playButton = NSButton()
     let filenameLabel = NSTextField(labelWithString: "")
-    let metadataLabel = NSTextField(labelWithString: "")
+    let metadataLabel: NSTextField = {
+        let field = NSTextField(labelWithString: "")
+        field.cell = MetadataCell(textCell: "")
+        field.isEditable = false
+        field.isSelectable = false
+        field.isBordered = false
+        field.drawsBackground = false
+        return field
+    }()
     let volumeSlider = NSSlider()
     let loopButton = NSButton()
     let gearButton = NSButton()
@@ -621,14 +681,16 @@ final class SlipContentView: NSView {
         playButton.action = #selector(playPressed)
         playButton.setAccessibilityIdentifier("slip.play")
 
-        filenameLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        filenameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         filenameLabel.lineBreakMode = .byTruncatingTail
         filenameLabel.setAccessibilityIdentifier("slip.filename")
-        metadataLabel.font = .systemFont(ofSize: 11)
+        // Fixed-width digits keep the ticking time from nudging the row.
+        metadataLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         metadataLabel.alignment = .right
         metadataLabel.lineBreakMode = .byTruncatingTail
         metadataLabel.setAccessibilityIdentifier("slip.metadata")
 
+        volumeSlider.controlSize = .small
         volumeSlider.minValue = 0
         volumeSlider.maxValue = 1
         volumeSlider.doubleValue = 1
@@ -730,23 +792,31 @@ final class SlipContentView: NSView {
         let headerHeight: CGFloat = 34
         let pad: CGFloat = 10
         let gap: CGFloat = 8
+        let textGap: CGFloat = 12
         let button: CGFloat = 24
         let volumeWidth: CGFloat = 72
-        playButton.frame = NSRect(x: pad, y: (headerHeight - button) / 2, width: button, height: button)
+        let midY = headerHeight / 2
+        let buttonY = midY - button / 2
+        playButton.frame = NSRect(x: pad, y: buttonY, width: button, height: button)
         let gearX = bounds.width - pad - button
-        gearButton.frame = NSRect(x: gearX, y: (headerHeight - button) / 2, width: button, height: button)
+        gearButton.frame = NSRect(x: gearX, y: buttonY, width: button, height: button)
         let loopX = gearX - gap - button
-        loopButton.frame = NSRect(x: loopX, y: (headerHeight - button) / 2, width: button, height: button)
+        loopButton.frame = NSRect(x: loopX, y: buttonY, width: button, height: button)
         let volumeX = loopX - gap - volumeWidth
-        volumeSlider.frame = NSRect(x: volumeX, y: (headerHeight - button) / 2, width: volumeWidth, height: button)
+        let sliderHeight = volumeSlider.fittingSize.height
+        volumeSlider.frame = NSRect(x: volumeX, y: midY - sliderHeight / 2, width: volumeWidth, height: sliderHeight)
         let nameX = pad + button + gap
-        let available = max(0, volumeX - gap - nameX)
-        let metaWidth = min(fieldWidth(metadataLabel), available)
-        let metaX = volumeX - gap - metaWidth
-        let nameWidth = max(0, metaX - gap - nameX)
-        let labelHeight = headerHeight - 2
-        filenameLabel.frame = NSRect(x: nameX, y: 0, width: nameWidth, height: labelHeight)
-        metadataLabel.frame = NSRect(x: metaX, y: 0, width: metaWidth, height: labelHeight)
+        // Squeeze order: the metadata info truncates first, then the filename, and the time never does.
+        let minNameWidth: CGFloat = 80
+        let available = max(0, volumeX - textGap - nameX - minNameWidth - textGap)
+        let metaWidth = (metadataLabel.cell as? MetadataCell)?.fittingWidth(within: available)
+            ?? min(fieldWidth(metadataLabel), available)
+        let metaX = volumeX - textGap - metaWidth
+        let nameWidth = max(0, metaX - textGap - nameX)
+        // Both labels share one baseline, placed so the title's caps sit on the row's center like the icons.
+        let baseline = (midY + (filenameLabel.font?.capHeight ?? 9) / 2).rounded()
+        filenameLabel.frame = labelFrame(filenameLabel, x: nameX, width: nameWidth, baseline: baseline)
+        metadataLabel.frame = labelFrame(metadataLabel, x: metaX, width: metaWidth, baseline: baseline)
         filenameLabel.toolTip = filenameLabel.stringValue.isEmpty ? nil : filenameLabel.stringValue
         metadataLabel.toolTip = metadataLabel.stringValue.isEmpty ? nil : metadataLabel.stringValue
         filenameLabel.lineBreakMode = .byTruncatingTail
@@ -969,6 +1039,13 @@ final class SlipContentView: NSView {
         return !controls.contains { $0.frame.contains(point) }
     }
 
+    private func labelFrame(_ field: NSTextField, x: CGFloat, width: CGFloat, baseline: CGFloat) -> NSRect {
+        let height = ceil(field.cell?.cellSize.height ?? 16)
+        let font = field.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        let ascent = ceil(font.ascender)
+        return NSRect(x: x, y: baseline - ascent, width: width, height: height)
+    }
+
     private func fieldWidth(_ field: NSTextField) -> CGFloat {
         guard !field.stringValue.isEmpty, let cell = field.cell else { return 0 }
         let fitted = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: 10_000, height: 40)).width
@@ -1100,6 +1177,7 @@ final class SlipContentView: NSView {
         button.bezelStyle = .inline
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
+        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         button.target = self
     }
 
