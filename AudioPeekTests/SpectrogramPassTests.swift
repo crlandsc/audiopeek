@@ -233,6 +233,29 @@ final class SpectrogramPassTests: XCTestCase {
         XCTAssertTrue(zeroWidth.allSatisfy { $0.weights.isEmpty })
     }
 
+    func testAPaneWiderThanTheHopCountHasNoEmptyColumns() throws {
+        let hops = 100
+        let frames = hops * 512
+        let columns = 160
+        let engine = try XCTUnwrap(
+            SpectrogramAccumulator(job: factoryJob(), sampleRate: 44100, channels: 1, totalFrames: frames, columnCount: columns)
+        )
+        var seed: UInt32 = 1
+        let samples = (0..<frames).map { _ -> Float in
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return Float(Int32(bitPattern: seed)) / Float(Int32.max) * 0.5
+        }
+        samples.withUnsafeBufferPointer { buffer in
+            engine.ingest(base: buffer.baseAddress!, frames: frames, channels: 1)
+        }
+        engine.finish()
+        for picture in [engine.paintedColumns()[0], engine.allColumns()[0]] {
+            XCTAssertEqual(picture.count, columns)
+            let empty = picture.indices.filter { index in picture[index].allSatisfy { $0 == 0 } }
+            XCTAssertEqual(empty, [])
+        }
+    }
+
     func testDualDrainOfDifferentSamplesDoesNotComeOutEqual() throws {
         let frames = 4096
         let engine = try XCTUnwrap(

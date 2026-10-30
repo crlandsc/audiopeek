@@ -189,6 +189,7 @@ final class SpectrogramAccumulator {
     private var splitImag: [Float]
     private var spectrum: [Float]
     private var highestColumn = -1
+    private var written: [Bool]
 
     init?(job: SpectrogramJob, sampleRate: Double, channels: Int, totalFrames: Int, columnCount: Int) {
         guard job.isValid(sampleRate: sampleRate), channels > 0, totalFrames > 0, columnCount > 0 else { return nil }
@@ -239,6 +240,7 @@ final class SpectrogramAccumulator {
         pending = Array(repeating: Array(repeating: 0, count: pad), count: lanes)
         head = Array(repeating: 0, count: lanes)
         powers = Array(repeating: 0, count: lanes * columnCount * binCount)
+        written = Array(repeating: false, count: columnCount)
         windowed = [Float](repeating: 0, count: nFFT)
         splitReal = [Float](repeating: 0, count: nFFT / 2)
         splitImag = [Float](repeating: 0, count: nFFT / 2)
@@ -282,8 +284,9 @@ final class SpectrogramAccumulator {
     }
 
     func allColumns() -> [[[Float]]] {
-        (0..<lanes).map { lane in
-            (0..<columnCount).map { column in
+        let sources = sourceColumns(count: columnCount)
+        return (0..<lanes).map { lane in
+            sources.map { column in
                 (0..<binCount).map { bin in
                     powers[((lane * columnCount) + column) * binCount + bin]
                 }
@@ -292,15 +295,31 @@ final class SpectrogramAccumulator {
     }
 
     func paintedColumns() -> [[[Float]]] {
-        let count = filledColumns
+        let sources = sourceColumns(count: filledColumns)
         let source = powers
         let bins = binCount
         let columns = columnCount
         return (0..<lanes).map { lane in
-            (0..<count).map { column in
+            sources.map { column in
                 let start = ((lane * columns) + column) * bins
                 return Array(source[start..<(start + bins)])
             }
+        }
+    }
+
+    /// A pane wider than the file's hop count leaves columns no hop lands in.
+    /// Each of those repeats the last written column, and a leading gap takes
+    /// the first written one, so the picture has no black stripes.
+    private func sourceColumns(count: Int) -> [Int] {
+        guard let first = written.prefix(count).firstIndex(of: true) else {
+            return Array(0..<count)
+        }
+        var last = first
+        return (0..<count).map { column in
+            if written[column] {
+                last = column
+            }
+            return last
         }
     }
 
@@ -321,6 +340,7 @@ final class SpectrogramAccumulator {
                     powers[slot] = max(powers[slot], values[bin])
                 }
             }
+            written[column] = true
             highestColumn = max(highestColumn, column)
             hopIndex += 1
             for lane in 0..<lanes {
