@@ -227,6 +227,10 @@ final class TestBridge: NSObject {
             waveformGreen: slip.waveformGreen,
             waveformBlue: slip.waveformBlue,
             settingsLabels: settings.controlLabels(),
+            settingsPane: settings.currentPane.rawValue,
+            settingsFrameWidth: settings.frame.width,
+            settingsFrameHeight: settings.frame.height,
+            settingsFrameMaxY: settings.frame.maxY,
             slipFrameX: slip.frame.origin.x,
             slipFrameY: slip.frame.origin.y,
             slipFrameWidth: slip.frame.width,
@@ -262,6 +266,10 @@ final class TestBridge: NSObject {
             app.application(NSApp, open: paths.map { URL(fileURLWithPath: $0) })
         case "openSettings":
             onOpenSettings()
+        case "selectSettingsPane":
+            if let name = userInfo["pane"] as? String, let pane = SettingsPane(rawValue: name) {
+                settings.select(pane)
+            }
         case "snapshot":
             if let path = userInfo["path"] as? String {
                 _ = settings.writePNG(to: URL(fileURLWithPath: path))
@@ -503,6 +511,10 @@ private struct TestState: Encodable {
     var waveformGreen: Double
     var waveformBlue: Double
     var settingsLabels: [String]
+    var settingsPane: String
+    var settingsFrameWidth: Double
+    var settingsFrameHeight: Double
+    var settingsFrameMaxY: Double
     var slipFrameX: Double
     var slipFrameY: Double
     var slipFrameWidth: Double

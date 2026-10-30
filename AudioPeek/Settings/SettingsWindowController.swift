@@ -2,13 +2,18 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
+    static let paneWidth: CGFloat = 500
+
     private let store: SettingsStore
     private let onLoginToggle: (Bool) -> Void
     private let onOpenLoginItems: () -> Void
     private let onOpenAutomation: () -> Void
     private let onReset: () -> Void
     private var window: NSWindow?
+    private var paneViews: [SettingsPane: NSHostingView<SettingsPaneView>] = [:]
+    private var paneHeights: [SettingsPane: CGFloat] = [:]
+    private(set) var currentPane: SettingsPane = .general
 
     init(
         store: SettingsStore,
@@ -28,9 +33,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.isVisible ?? false
     }
 
+    var frame: NSRect {
+        window?.frame ?? .zero
+    }
+
+    // Labels from every pane, not just the visible one, so tests can find any control.
     func controlLabels() -> [String] {
-        guard let view = window?.contentView else { return [] }
-        view.layoutSubtreeIfNeeded()
+        guard window != nil else { return [] }
         var labels: [String] = []
         var seen = Set<ObjectIdentifier>()
         func walk(_ object: AnyObject) {
@@ -58,16 +67,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 walk(child as AnyObject)
             }
         }
-        walk(view)
+        for pane in SettingsPane.allCases {
+            if let view = paneViews[pane] {
+                view.layoutSubtreeIfNeeded()
+                walk(view)
+            }
+        }
         return labels
     }
 
     func show() {
         let window = self.window ?? makeWindow()
         self.window = window
+        if !store.finderMessage.isEmpty {
+            select(.general, animate: false)
+        }
         window.makeKeyAndOrderFront(nil)
-        window.title = "AudioPeek Settings"
         window.orderFrontRegardless()
+    }
+
+    func select(_ pane: SettingsPane, animate: Bool = true) {
+        let window = self.window ?? makeWindow()
+        self.window = window
+        currentPane = pane
+        window.toolbar?.selectedItemIdentifier = pane.toolbarIdentifier
+        window.title = pane.title
+        if let container = window.contentView, let view = paneViews[pane] {
+            container.subviews = [view]
+            view.frame = container.bounds
+            view.autoresizingMask = [.width, .height]
+        }
+        fit(animate: animate && window.isVisible)
     }
 
     @discardableResult
@@ -89,25 +119,106 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
+        if let window { return window }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: Self.paneWidth, height: 400),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "AudioPeek Settings"
         window.delegate = self
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 420, height: 480)
-        let root = SettingsView(
-            store: store,
+        window.toolbarStyle = .preference
+        // No autosave names: a test instance would otherwise write them into the real app's defaults.
+        let toolbar = NSToolbar(identifier: "AudioPeekSettings")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        window.toolbar = toolbar
+        window.contentView = NSView(frame: NSRect(x: 0, y: 0, width: Self.paneWidth, height: 400))
+        let actions = SettingsActions(
             onLoginToggle: onLoginToggle,
             onOpenLoginItems: onOpenLoginItems,
             onOpenAutomation: onOpenAutomation,
             onReset: onReset
         )
-        window.contentViewController = NSHostingController(rootView: root)
+        for pane in SettingsPane.allCases {
+            let view = NSHostingView(rootView: SettingsPaneView(pane: pane, store: store, actions: actions) { [weak self] height in
+                self?.paneHeightChanged(pane, to: height)
+            })
+            view.sizingOptions = []
+            paneViews[pane] = view
+        }
+        self.window = window
+        select(currentPane, animate: false)
         window.center()
         return window
+    }
+
+    private func paneHeightChanged(_ pane: SettingsPane, to height: CGFloat) {
+        guard height > 1, paneHeights[pane] != height else { return }
+        paneHeights[pane] = height
+        if pane == currentPane {
+            fit(animate: window?.isVisible ?? false)
+        }
+    }
+
+    // Size the window to the current pane, keeping its top edge fixed and staying on screen.
+    private func fit(animate: Bool) {
+        guard let window, let view = paneViews[currentPane] else { return }
+        var height = paneHeights[currentPane] ?? 0
+        if height <= 1 {
+            view.layoutSubtreeIfNeeded()
+            height = view.fittingSize.height
+        }
+        guard height > 1 else { return }
+        let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+        let chrome = window.frame.height - window.contentLayoutRect.height
+        if let visible {
+            height = min(height, visible.height - chrome)
+        }
+        let content = NSSize(width: Self.paneWidth, height: ceil(height))
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
+        frame.origin.x = window.frame.minX
+        frame.origin.y = window.frame.maxY - frame.height
+        if let visible, frame.minY < visible.minY {
+            frame.origin.y = visible.minY
+        }
+        guard frame.size != window.frame.size || frame.origin != window.frame.origin else { return }
+        window.setFrame(frame, display: true, animate: animate)
+    }
+
+    // MARK: NSToolbarDelegate
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        SettingsPane.allCases.map(\.toolbarIdentifier)
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        SettingsPane.allCases.map(\.toolbarIdentifier)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        SettingsPane.allCases.map(\.toolbarIdentifier)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard let pane = SettingsPane.allCases.first(where: { $0.toolbarIdentifier == itemIdentifier }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = pane.title
+        item.image = NSImage(systemSymbolName: pane.symbolName, accessibilityDescription: pane.title)
+        item.target = self
+        item.action = #selector(paneItemPressed(_:))
+        return item
+    }
+
+    @objc private func paneItemPressed(_ sender: NSToolbarItem) {
+        guard let pane = SettingsPane.allCases.first(where: { $0.toolbarIdentifier == sender.itemIdentifier }) else { return }
+        select(pane)
     }
 }

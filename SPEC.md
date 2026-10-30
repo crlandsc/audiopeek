@@ -160,7 +160,7 @@ Folders inside the app target, not extra packages:
 - **FinderBridge**: Apple Events to Finder.
 - **Viewer**: overlay and playback.
 - **Analysis**: chunked decode, STFT, and mel on a background queue. A selection change discards the in-flight pass. Pressure pauses it (see Machine load). On that queue, call `ExtAudioFileOpenURL` and check cancel between every `ExtAudioFileRead`.
-- **Settings**: SwiftUI form, one UserDefaults blob. The engine rereads that blob when settings change and at the start of the next analysis pass. The remembered window frame lives in that blob. The volume slider is a separate persisted value.
+- **Settings**: a preference-style window with three toolbar panes (General, Waveform, Spectrogram), each a grouped SwiftUI form; the window title follows the pane and the window sizes to it. One UserDefaults blob. The engine rereads that blob when settings change and at the start of the next analysis pass. The remembered window frame lives in that blob. The volume slider is a separate persisted value.
 
 The process is an `LSUIElement` menu-bar extra. No Dock icon by default. The status item is shown by default and can be hidden. It shows the play mark and does not show the name. Its menu is Settings and Quit. The app icon is that same mark. Playback and analysis stay in-process. The app is not sandboxed.
 
