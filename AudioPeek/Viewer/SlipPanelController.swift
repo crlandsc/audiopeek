@@ -4,6 +4,9 @@ import AVFAudio
 final class SlipWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    /// The panel's content, held directly: on macOS 26 it sits inside a glass view,
+    /// so it is not the window's contentView.
+    weak var slipContent: SlipContentView?
 
     // A borderless resizable panel starts AppKit's own live-resize session on
     // an edge mouse-down. That session keeps a cached frame (and the shadow
@@ -15,7 +18,7 @@ final class SlipWindow: NSPanel {
             acceptsMouseMovedEvents = true
         }
         if event.type == .leftMouseDown,
-           let content = contentView as? SlipContentView,
+           let content = slipContent,
            !content.isResizeDrag {
             let local = content.convert(event.locationInWindow, from: nil)
             if content.resizeEdges(at: local).isActive {
@@ -27,7 +30,7 @@ final class SlipWindow: NSPanel {
         if event.type == .mouseExited {
             NSCursor.arrow.set()
         } else if event.type == .mouseMoved || event.type == .mouseEntered || event.type == .cursorUpdate,
-                  let content = contentView as? SlipContentView {
+                  let content = slipContent {
             content.updateHoverCursor(with: event)
         }
     }
@@ -40,6 +43,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private let hotkey: HotkeyCenter
     private let onOpenSettings: () -> Void
     private let content = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
+    /// Test hook: draw the macOS 15 solid panel even where Liquid Glass is available.
+    var forceSolidChrome = false
+    var usesGlass: Bool { content.usesGlass }
     private let playback = PlaybackController()
     private let gate = MachineLoadGate()
     private let overview = WaveformOverview()
@@ -373,6 +379,17 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    func setHoverOverride(_ point: NSPoint?) {
+        content.hoverOverride = point
+        if let point {
+            content.updateResizeHighlight(at: point, panelHit: true)
+        } else {
+            content.updateResizeHighlight(at: .zero, panelHit: false)
+        }
+    }
+
+    var highlightEdges: SlipResizeEdges { content.resizeHighlight.edges }
+
     func setForcedAppearance(_ name: String) {
         let appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
         NSApp.appearance = appearance
@@ -460,7 +477,9 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func writePNG(to url: URL) -> Bool {
-        guard let view = panel?.contentView else { return false }
+        // Snapshot our own view: offscreen captures of the glass come back blank.
+        guard panel != nil else { return false }
+        let view: NSView = content
         view.layoutSubtreeIfNeeded()
         let bounds = view.bounds
         guard bounds.width > 1, bounds.height > 1,
@@ -739,7 +758,21 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         window.hasShadow = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.minSize = NSSize(width: 420, height: 280)
-        window.contentView = content
+        window.slipContent = content
+        if #available(macOS 26, *), !forceSolidChrome {
+            // Liquid Glass behind the whole panel; our view goes inside it so AppKit keeps it legible.
+            let glass = NSGlassEffectView(frame: NSRect(origin: .zero, size: rect.size))
+            glass.style = .regular
+            glass.cornerRadius = SlipLayout.cornerRadius
+            content.frame = glass.bounds
+            content.autoresizingMask = [.width, .height]
+            glass.contentView = content
+            window.contentView = glass
+            content.usesGlass = true
+        } else {
+            window.contentView = content
+            content.usesGlass = false
+        }
         window.delegate = self
         window.acceptsMouseMovedEvents = true
         panelsMade += 1

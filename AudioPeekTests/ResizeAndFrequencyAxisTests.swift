@@ -12,10 +12,11 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
             (NSPoint(x: 856, y: 250), .resizeLeftRight),
             (NSPoint(x: 430, y: 3), .resizeUpDown),
             (NSPoint(x: 430, y: 496), .resizeUpDown),
-            (NSPoint(x: 3, y: 3), SlipResizeAxis.upLeftCursor),
-            (NSPoint(x: 856, y: 496), SlipResizeAxis.upLeftCursor),
-            (NSPoint(x: 856, y: 3), SlipResizeAxis.upRightCursor),
-            (NSPoint(x: 3, y: 496), SlipResizeAxis.upRightCursor)
+            // Corners are probed just inside the rounded shape; the cut-away corner is not a grab area.
+            (NSPoint(x: 6, y: 6), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 854, y: 494), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 854, y: 6), SlipResizeAxis.upRightCursor),
+            (NSPoint(x: 6, y: 494), SlipResizeAxis.upRightCursor)
         ]
         for (point, cursor) in checks {
             XCTAssertTrue(view.resizeCursor(at: point) === cursor)
@@ -33,11 +34,15 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
         XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1575, y: 630), in: bounds), SlipResizeEdges(right: true, bottom: true))
         XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1560, y: 640), in: bounds), SlipResizeEdges(right: true, bottom: true))
         XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 1575, y: 300), in: bounds), SlipResizeEdges(right: true))
-        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 9, y: 300), in: bounds), SlipResizeEdges(left: true))
-        XCTAssertFalse(SlipResize.edges(at: NSPoint(x: 11, y: 300), in: bounds).isActive)
+        XCTAssertEqual(SlipResize.edges(at: NSPoint(x: 11, y: 300), in: bounds), SlipResizeEdges(left: true))
+        XCTAssertFalse(SlipResize.edges(at: NSPoint(x: 13, y: 300), in: bounds).isActive)
+        // The cut-away corner outside the rounded shape is not a grab area.
+        XCTAssertFalse(SlipResize.edges(at: NSPoint(x: 1, y: 1), in: bounds).isActive)
         for control in [view.playButton, view.gearButton] {
+            // The header controls sit clear of the rim, and never resize.
+            XCTAssertGreaterThan(control.frame.minY, SlipResize.topMargin)
+            XCTAssertTrue(control.frame.minX > SlipResize.margin && control.frame.maxX < bounds.maxX - SlipResize.margin)
             let point = NSPoint(x: control.frame.midX, y: control.frame.minY + 1)
-            XCTAssertTrue(SlipResize.edges(at: point, in: bounds).isActive)
             XCTAssertFalse(view.resizeEdges(at: point).isActive)
             XCTAssertNil(view.resizeCursor(at: point))
         }
@@ -336,10 +341,11 @@ final class ResizeAndFrequencyAxisTests: XCTestCase {
             (NSPoint(x: 856, y: 250), .resizeLeftRight),
             (NSPoint(x: 430, y: 3), .resizeUpDown),
             (NSPoint(x: 430, y: 496), .resizeUpDown),
-            (NSPoint(x: 3, y: 3), SlipResizeAxis.upLeftCursor),
-            (NSPoint(x: 856, y: 496), SlipResizeAxis.upLeftCursor),
-            (NSPoint(x: 856, y: 3), SlipResizeAxis.upRightCursor),
-            (NSPoint(x: 3, y: 496), SlipResizeAxis.upRightCursor)
+            // Corners are probed just inside the rounded shape; the cut-away corner is not a grab area.
+            (NSPoint(x: 6, y: 6), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 854, y: 494), SlipResizeAxis.upLeftCursor),
+            (NSPoint(x: 854, y: 6), SlipResizeAxis.upRightCursor),
+            (NSPoint(x: 6, y: 494), SlipResizeAxis.upRightCursor)
         ]
         for (point, cursor) in checks {
             XCTAssertTrue(view.resizeCursor(at: point) === cursor)

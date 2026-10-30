@@ -203,6 +203,11 @@ Check.expect(blueDominant(state), "the starting waveform is blue, rgb \(state["w
 
 state = command("setAppearance", extra: ["appearance": "dark"])
 Check.expect(state["slipAppearance"]?.string == "dark", "forced dark, got \(state["slipAppearance"]?.string ?? "")")
+// On macOS 26 and later the panel sits on Liquid Glass and draws no chrome color of its own,
+// so the chrome checks below cover the solid fallback color the view keeps for macOS 15.
+if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 {
+    Check.expect(state["slipUsesGlass"]?.bool == true, "the panel uses Liquid Glass on this macOS")
+}
 Check.expect(near(state, "chromeRed", 0x2A / 255) && near(state, "chromeBlue", 0x2C / 255), "dark chrome \(state["chromeRed"]?.double ?? -1) \(state["chromeGreen"]?.double ?? -1) \(state["chromeBlue"]?.double ?? -1)")
 Check.expect(near(state, "playheadRed", 1) && near(state, "playheadGreen", 0x45 / 255) && near(state, "playheadBlue", 0x3A / 255), "dark hairline \(state["playheadRed"]?.double ?? -1) \(state["playheadGreen"]?.double ?? -1) \(state["playheadBlue"]?.double ?? -1)")
 Check.expect(abs((state["playheadWidth"]?.double ?? 0) - 1) < 0.1, "playhead stays a 1 px hairline, got \(state["playheadWidth"]?.double ?? -1)")
