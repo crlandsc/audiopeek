@@ -505,7 +505,8 @@ final class WaveformOverview: @unchecked Sendable {
             },
             onSamples: { base, frames, channels, sampleRate, totalFrames in
                 if box.engine == nil, let spectrogram {
-                    let pictured = inspectPerColumn > 0 ? columnCount * inspectPerColumn : totalFrames
+                    // A column shorter than the window is read whole, so the coarse read never delivers more than the file.
+                    let pictured = inspectPerColumn > 0 ? min(totalFrames, columnCount * inspectPerColumn) : totalFrames
                     box.engine = SpectrogramAccumulator(
                         job: spectrogram,
                         sampleRate: sampleRate,
