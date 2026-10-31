@@ -127,7 +127,7 @@ func writeSilentWav(to url: URL, frames: Int, channels: Int) {
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase5 AudioPeek.app\n", stderr)
+    fputs("usage: verify-spectrogram AudioPeek.app\n", stderr)
     exit(2)
 }
 
@@ -146,12 +146,12 @@ let mel = run(
 print(mel.1)
 Check.expect(mel.0 == 0, "shipping columns stay within 1 dB of pinned librosa")
 if mel.0 != 0 {
-    print("PHASE5 FAIL")
+    print("SPECTROGRAM FAIL")
     exit(1)
 }
 
 stopRunningApps()
-let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase5-\(UUID().uuidString)", isDirectory: true)
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-spectrogram-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tone = root.appendingPathComponent("tone.wav")
 let long = root.appendingPathComponent("long.wav")
@@ -169,9 +169,9 @@ defer {
 }
 
 let id = UUID().uuidString
-let suite = "audiopeek.phase5.\(id)"
-let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase5-\(id).json")
-let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase5-\(id)-config.json")
+let suite = "audiopeek.spectrogram.\(id)"
+let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-spectrogram-\(id).json")
+let configURL = URL(fileURLWithPath: "/tmp/audiopeek-spectrogram-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
@@ -223,7 +223,7 @@ let opened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL
 Check.expect(opened.0 == 0, "open launched the app")
 guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) != nil else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE5 FAIL")
+    print("SPECTROGRAM FAIL")
     exit(1)
 }
 
@@ -277,8 +277,8 @@ Thread.sleep(forTimeInterval: 0.3)
 Check.expect(runningApps().isEmpty, "app quit")
 
 if Check.failures.isEmpty {
-    print("PHASE5 PASS")
+    print("SPECTROGRAM PASS")
 } else {
-    print("PHASE5 FAIL \(Check.failures.count)")
+    print("SPECTROGRAM FAIL \(Check.failures.count)")
     exit(1)
 }
