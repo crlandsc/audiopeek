@@ -114,13 +114,13 @@ func writeWav(to url: URL, frames: Int, channels: Int, sample: (Int, Int) -> Int
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase4 AudioPeek.app\n", stderr)
+    fputs("usage: verify-waveform AudioPeek.app\n", stderr)
     exit(2)
 }
 
 let appPath = CommandLine.arguments[1]
 stopRunningApps()
-let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase4-\(UUID().uuidString)", isDirectory: true)
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-waveform-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tone = root.appendingPathComponent("tone.wav")
 let other = root.appendingPathComponent("other.wav")
@@ -140,9 +140,9 @@ defer {
 }
 
 let id = UUID().uuidString
-let suite = "audiopeek.phase4.\(id)"
-let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase4-\(id).json")
-let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase4-\(id)-config.json")
+let suite = "audiopeek.waveform.\(id)"
+let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-waveform-\(id).json")
+let configURL = URL(fileURLWithPath: "/tmp/audiopeek-waveform-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
@@ -203,7 +203,7 @@ let opened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL
 Check.expect(opened.0 == 0, "open launched the app")
 guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) != nil else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE4 FAIL")
+    print("WAVEFORM FAIL")
     exit(1)
 }
 
@@ -293,8 +293,8 @@ Thread.sleep(forTimeInterval: 0.3)
 Check.expect(runningApps().isEmpty, "app quit")
 
 if Check.failures.isEmpty {
-    print("PHASE4 PASS")
+    print("WAVEFORM PASS")
 } else {
-    print("PHASE4 FAIL \(Check.failures.count)")
+    print("WAVEFORM FAIL \(Check.failures.count)")
     exit(1)
 }

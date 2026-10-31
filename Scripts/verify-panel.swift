@@ -135,7 +135,7 @@ func sourceHits(_ pattern: String) -> String {
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase2 AudioPeek.app\n", stderr)
+    fputs("usage: verify-panel AudioPeek.app\n", stderr)
     exit(2)
 }
 
@@ -150,7 +150,7 @@ Check.expect(usage.0 == 0 && usageText.contains("Finder"), "usage string mention
 let forbidden = sourceHits("addGlobalMonitorForEvents|AXUIElement|NSAppleScript|CGEvent\\.tapCreate")
 Check.expect(forbidden.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "no global monitor, event tap, Accessibility, or AppleScript (\(forbidden))")
 
-let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase2-\(UUID().uuidString)", isDirectory: true)
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-panel-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let wavA = root.appendingPathComponent("tone.wav")
 let wavB = root.appendingPathComponent("other.wav")
@@ -165,9 +165,9 @@ try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories
 defer { try? FileManager.default.removeItem(at: root) }
 
 let id = UUID().uuidString
-let suite = "audiopeek.phase2.\(id)"
-let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase2-\(id).json")
-let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase2-\(id)-config.json")
+let suite = "audiopeek.panel.\(id)"
+let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-panel-\(id).json")
+let configURL = URL(fileURLWithPath: "/tmp/audiopeek-panel-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
@@ -187,7 +187,7 @@ let opened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL
 Check.expect(opened.0 == 0, "open launched the app")
 guard var state = waitForState(at: stateURL, above: 0) else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE2 FAIL")
+    print("PANEL FAIL")
     exit(1)
 }
 
@@ -322,7 +322,7 @@ Check.expect(state["playbackRunning"]?.bool == true, "space resumes playback aga
 Check.expect(abs((state["slipFrameWidth"]?.double ?? 0) - 860) < 1, "first width 860, got \(state["slipFrameWidth"]?.double ?? 0)")
 Check.expect(abs((state["slipFrameHeight"]?.double ?? 0) - 500) < 1, "first height 500, got \(state["slipFrameHeight"]?.double ?? 0)")
 
-let slipPNG = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/phase2-slip.png").path
+let slipPNG = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/panel-slip.png").path
 _ = command("snapshotSlip", extra: ["path": slipPNG])
 Check.expect(FileManager.default.fileExists(atPath: slipPNG), "slip snapshot")
 
@@ -427,8 +427,8 @@ Thread.sleep(forTimeInterval: 0.4)
 Check.expect(runningApps().isEmpty, "app quit")
 
 if Check.failures.isEmpty {
-    print("PHASE2 PASS")
+    print("PANEL PASS")
 } else {
-    print("PHASE2 FAIL \(Check.failures.count)")
+    print("PANEL FAIL \(Check.failures.count)")
     exit(1)
 }

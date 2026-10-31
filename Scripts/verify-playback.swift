@@ -113,13 +113,13 @@ func systemVolume() -> String {
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase3 AudioPeek.app\n", stderr)
+    fputs("usage: verify-playback AudioPeek.app\n", stderr)
     exit(2)
 }
 
 let appPath = CommandLine.arguments[1]
 stopRunningApps()
-let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase3-\(UUID().uuidString)", isDirectory: true)
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-playback-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tone = root.appendingPathComponent("tone.wav")
 let broken = root.appendingPathComponent("broken.wav")
@@ -131,9 +131,9 @@ defer {
 }
 
 let id = UUID().uuidString
-let suite = "audiopeek.phase3.\(id)"
-let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase3-\(id).json")
-let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase3-\(id)-config.json")
+let suite = "audiopeek.playback.\(id)"
+let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-playback-\(id).json")
+let configURL = URL(fileURLWithPath: "/tmp/audiopeek-playback-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
@@ -172,7 +172,7 @@ let opened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL
 Check.expect(opened.0 == 0, "open launched the app")
 guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) != nil else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE3 FAIL")
+    print("PLAYBACK FAIL")
     exit(1)
 }
 
@@ -254,8 +254,8 @@ Thread.sleep(forTimeInterval: 0.3)
 Check.expect(runningApps().isEmpty, "app quit")
 
 if Check.failures.isEmpty {
-    print("PHASE3 PASS")
+    print("PLAYBACK PASS")
 } else {
-    print("PHASE3 FAIL \(Check.failures.count)")
+    print("PLAYBACK FAIL \(Check.failures.count)")
     exit(1)
 }

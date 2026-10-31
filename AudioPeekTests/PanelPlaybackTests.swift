@@ -4,7 +4,7 @@ import XCTest
 @testable import AudioPeek
 
 @MainActor
-final class Slice11Tests: XCTestCase {
+final class PanelPlaybackTests: XCTestCase {
     func testMetadataStaysClearOfTheControls() {
         let view = SlipContentView(frame: NSRect(x: 0, y: 0, width: 860, height: 500))
         view.filenameLabel.stringValue = "tone.wav"

@@ -130,13 +130,13 @@ func blueDominant(_ state: JSONValue) -> Bool {
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase6 AudioPeek.app\n", stderr)
+    fputs("usage: verify-appearance AudioPeek.app\n", stderr)
     exit(2)
 }
 
 let appPath = CommandLine.arguments[1]
 stopRunningApps()
-let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase6-\(UUID().uuidString)", isDirectory: true)
+let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-appearance-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tone = root.appendingPathComponent("tone.wav")
 writeWav(to: tone, frames: 44100 * 30) { frame in
@@ -148,9 +148,9 @@ defer {
 }
 
 let id = UUID().uuidString
-let suite = "audiopeek.phase6.\(id)"
-let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase6-\(id).json")
-let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase6-\(id)-config.json")
+let suite = "audiopeek.appearance.\(id)"
+let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-appearance-\(id).json")
+let configURL = URL(fileURLWithPath: "/tmp/audiopeek-appearance-\(id)-config.json")
 let config: [String: Any] = [
     "defaultsSuite": suite,
     "statePath": stateURL.path,
@@ -189,7 +189,7 @@ let opened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL
 Check.expect(opened.0 == 0, "open launched the app")
 guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) != nil else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE6 FAIL")
+    print("APPEARANCE FAIL")
     exit(1)
 }
 
@@ -269,8 +269,8 @@ while Date() < quitDeadline && !runningApps().isEmpty { Thread.sleep(forTimeInte
 Check.expect(runningApps().isEmpty, "app quit")
 
 if Check.failures.isEmpty {
-    print("PHASE6 PASS")
+    print("APPEARANCE PASS")
 } else {
-    print("PHASE6 FAIL \(Check.failures.count)")
+    print("APPEARANCE FAIL \(Check.failures.count)")
     exit(1)
 }

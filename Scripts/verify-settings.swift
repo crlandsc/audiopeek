@@ -200,9 +200,9 @@ struct Session {
 
 func makeSession(inject: String?) -> Session {
     let id = UUID().uuidString
-    let suite = "audiopeek.phase1.\(id)"
-    let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-phase1-\(id).json")
-    let configURL = URL(fileURLWithPath: "/tmp/audiopeek-phase1-\(id)-config.json")
+    let suite = "audiopeek.settings.\(id)"
+    let stateURL = URL(fileURLWithPath: "/tmp/audiopeek-settings-\(id).json")
+    let configURL = URL(fileURLWithPath: "/tmp/audiopeek-settings-\(id)-config.json")
     var config: [String: Any] = [
         "defaultsSuite": suite,
         "statePath": stateURL.path,
@@ -265,7 +265,7 @@ func snapshot(stateURL: URL, generation: Int, path: String) -> JSONValue? {
 }
 
 guard CommandLine.arguments.count > 1 else {
-    fputs("usage: verify-phase1 AudioPeek.app\n", stderr)
+    fputs("usage: verify-settings AudioPeek.app\n", stderr)
     exit(2)
 }
 
@@ -293,7 +293,7 @@ defer { fresh.cleanup() }
 launch(appPath: appPath, configPath: fresh.configURL.path)
 guard var state = waitForState(at: fresh.stateURL, above: 0) else {
     Check.expect(false, "app wrote launch state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     exit(1)
 }
 let pid = state["pid"]?.int
@@ -317,7 +317,7 @@ let generationBeforeReset = state["generation"]?.int ?? 0
 post("reset")
 guard let resetState = waitForState(at: fresh.stateURL, above: generationBeforeReset) else {
     Check.expect(false, "reset state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -330,7 +330,7 @@ let generationBeforeHide = state["generation"]?.int ?? 0
 post("hideStatusItem")
 guard let hidden = waitForState(at: fresh.stateURL, above: generationBeforeHide) else {
     Check.expect(false, "hide status item")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -344,7 +344,7 @@ let reopen = run("/usr/bin/open", [appPath])
 Check.expect(reopen.0 == 0, "second launch open")
 guard let reopened = waitForState(at: fresh.stateURL, above: generationBeforeReopen) else {
     Check.expect(false, "second launch state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -358,13 +358,13 @@ Check.expect(state["blob"]?["showStatusItem"]?.bool == false, "second launch doe
 let windowID = waitForSettingsWindow()
 Check.expect(windowID != nil, "Settings window is on screen")
 let settingsPNG = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    .appendingPathComponent("build/phase1-settings.png").path
+    .appendingPathComponent("build/settings-settings.png").path
 if let shot = snapshot(stateURL: fresh.stateURL, generation: state["generation"]?.int ?? 0, path: settingsPNG) {
     state = shot
 }
 Check.expect(FileManager.default.fileExists(atPath: settingsPNG), "settings window snapshot")
 
-let openRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-phase1-\(UUID().uuidString)", isDirectory: true)
+let openRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiopeek-settings-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: openRoot, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: openRoot) }
 let wav = openRoot.appendingPathComponent("tone.wav")
@@ -376,7 +376,7 @@ let generationBeforeOpen = state["generation"]?.int ?? 0
 post("open", extra: ["paths": [wav.path]])
 guard let opened = waitForState(at: fresh.stateURL, above: generationBeforeOpen) else {
     Check.expect(false, "one local wav state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -399,7 +399,7 @@ while Date() < hideDeadline {
 }
 guard let panelHidden else {
     Check.expect(false, "panel hide state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -410,7 +410,7 @@ let generationBeforeTwo = state["generation"]?.int ?? 0
 post("open", extra: ["paths": [wav.path, other.path]])
 guard let two = waitForState(at: fresh.stateURL, above: generationBeforeTwo) else {
     Check.expect(false, "two URL state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -421,7 +421,7 @@ let generationBeforeDock = state["generation"]?.int ?? 0
 post("setDockIcon", extra: ["dock": true])
 guard let dockOn = waitForState(at: fresh.stateURL, above: generationBeforeDock) else {
     Check.expect(false, "dock on state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -436,7 +436,7 @@ let generationBeforeDockOff = state["generation"]?.int ?? 0
 post("setDockIcon", extra: ["dock": false])
 guard let dockOff = waitForState(at: fresh.stateURL, above: generationBeforeDockOff) else {
     Check.expect(false, "dock off state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -448,7 +448,7 @@ let generationBeforeVolume = state["generation"]?.int ?? 0
 post("setVolume", extra: ["volume": 0.25])
 guard let volumeState = waitForState(at: fresh.stateURL, above: generationBeforeVolume) else {
     Check.expect(false, "volume state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -456,7 +456,7 @@ let generationBeforeFrame = volumeState["generation"]?.int ?? 0
 post("setWindowFrame", extra: ["x": 10, "y": 20, "width": 860, "height": 500])
 guard let frameState = waitForState(at: fresh.stateURL, above: generationBeforeFrame) else {
     Check.expect(false, "frame state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -464,7 +464,7 @@ let generationBeforeMutate = frameState["generation"]?.int ?? 0
 post("mutateKnobs")
 guard let mutated = waitForState(at: fresh.stateURL, above: generationBeforeMutate) else {
     Check.expect(false, "mutate state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -474,7 +474,7 @@ let generationBeforeFinalReset = mutated["generation"]?.int ?? 0
 post("reset")
 guard let restored = waitForState(at: fresh.stateURL, above: generationBeforeFinalReset) else {
     Check.expect(false, "final reset state")
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     stopRunningApps()
     exit(1)
 }
@@ -527,7 +527,7 @@ func runInjection(_ mode: String, code: Int, capture: Bool) {
     assertLoginFailure(failed, code: code, label: mode)
     if capture {
         let path = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("build/phase1-login-failure.png").path
+            .appendingPathComponent("build/settings-login-failure.png").path
         _ = snapshot(stateURL: session.stateURL, generation: failed["generation"]?.int ?? 0, path: path)
         Check.expect(FileManager.default.fileExists(atPath: path), "login failure snapshot")
     }
@@ -543,10 +543,10 @@ runInjection("other", code: 2, capture: false)
 stopRunningApps()
 
 if Check.failures.isEmpty {
-    print("PHASE1 PASS")
+    print("SETTINGS PASS")
     exit(0)
 } else {
-    print("PHASE1 FAIL")
+    print("SETTINGS FAIL")
     for failure in Check.failures {
         print(" - \(failure)")
     }
