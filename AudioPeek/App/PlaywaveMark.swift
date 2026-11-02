@@ -3,7 +3,8 @@ import AppKit
 /// The eye mark: an outlined eye whose iris is a short waveform.
 /// Canvas is 400 units. The eye's corners sit at x 44 and 356 on the midline, and each lid is a
 /// quadratic curve with its control 184 units above or below. Lids are a 26 unit round-joined stroke.
-/// Seven round-capped bars 18.4 wide, 25.6 apart, step down evenly from the middle.
+/// Seven round-capped bars 18.4 wide, 31.2 apart. Their heights sit a quarter of the way from an even
+/// step-down toward the eye's own curve, so the middle bar keeps a clear gap to the lid.
 enum PlaywaveMark {
     static let canvas: CGFloat = 400
     static let menuBarPointSize: CGFloat = 18
@@ -13,9 +14,9 @@ enum PlaywaveMark {
     private static let cornerInset: CGFloat = 44
     private static let lidReach: CGFloat = 184
     private static let lidWidth: CGFloat = 26
-    private static let barHeights: [CGFloat] = [24, 51, 78, 104, 78, 51, 24]
+    private static let barHeights: [CGFloat] = [27.4, 56.9, 82.7, 104, 82.7, 56.9, 27.4]
     private static let barWidth: CGFloat = 18.4
-    private static let barStep: CGFloat = 25.6
+    private static let barStep: CGFloat = 31.2
     /// The icon draws the 400 canvas inside this fraction of its side, centered.
     private static let iconFill: CGFloat = 0.84
 
