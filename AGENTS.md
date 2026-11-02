@@ -14,7 +14,7 @@ README.md is the user-facing description. This file is for working on the code.
 
 ## Code map
 
-- `AudioPeek/App/`: `AppDelegate` (wiring, second launch opens Settings), `HotkeyCenter` (Carbon hotkeys: the viewer hotkey, Escape, and Space while the panel is up), `StatusItemController`, `LoginItemController` (`SMAppService`), `PlaywaveMark` (the play-mark icon, drawn in code), `TestBridge` (test hooks, see below).
+- `AudioPeek/App/`: `AppDelegate` (wiring, second launch opens Settings), `HotkeyCenter` (Carbon hotkeys: the viewer hotkey, Escape, and Space while the panel is up), `StatusItemController`, `LoginItemController` (`SMAppService`), `PlaywaveMark` (the eye logo, drawn in code), `TestBridge` (test hooks, see below).
 - `AudioPeek/FinderBridge/`: asks Finder for its selection with a compiled Apple Event, and decides whether it is exactly one supported, local audio file.
 - `AudioPeek/Viewer/`:
   - `SlipPanelController`: the panel's lifecycle, Finder polling, playback, and starting and cancelling overview passes.
@@ -56,7 +56,7 @@ README.md is the user-facing description. This file is for working on the code.
 
 ## Icon and logo
 
-The play mark is drawn in code (`PlaywaveMark`). `Scripts/render-playwave.swift` writes the app icon set and the README logo from it:
+The logo, an outlined eye with a waveform iris, is drawn in code (`PlaywaveMark`). `Scripts/render-playwave.swift` writes the app icon set and the README logo from it:
 
 ```bash
 swiftc AudioPeek/App/PlaywaveMark.swift Scripts/render-playwave.swift -o build/render-playwave
