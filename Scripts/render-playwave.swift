@@ -26,7 +26,7 @@ enum RenderPlaywave {
         }
         if CommandLine.arguments.count > 2 {
             let readme = URL(fileURLWithPath: CommandLine.arguments[2])
-            write(PlaywaveMark.readmeImage(side: 1024), to: readme)
+            write(PlaywaveMark.readmeImage(width: 1024), to: readme)
         }
     }
 

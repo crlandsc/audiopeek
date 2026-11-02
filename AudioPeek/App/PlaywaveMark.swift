@@ -79,29 +79,29 @@ enum PlaywaveMark {
         return ctx.makeImage()!
     }
 
-    /// Blue eye, no plate, centered with a modest margin. This is the README image.
-    static func readmeImage(side: Int) -> CGImage {
-        let margin: CGFloat = 48
-        let view = markBounds.width + margin * 2
-        let origin = canvas / 2 - view / 2
-        let scale = CGFloat(side) / view
+    /// Blue eye, no plate, cropped to the eye with a thin margin. This is the README image.
+    static func readmeImage(width: Int) -> CGImage {
+        let margin: CGFloat = 8
+        let view = markBounds.insetBy(dx: -margin, dy: -margin)
+        let scale = CGFloat(width) / view.width
+        let height = Int((view.height * scale).rounded())
         let fitted = CGRect(
-            x: -origin * scale,
-            y: CGFloat(side) + (origin - canvas) * scale,
+            x: -view.minX * scale,
+            y: CGFloat(height) + (view.minY - canvas) * scale,
             width: canvas * scale,
             height: canvas * scale
         )
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         let ctx = CGContext(
             data: nil,
-            width: side,
-            height: side,
+            width: width,
+            height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )!
-        ctx.clear(CGRect(x: 0, y: 0, width: side, height: side))
+        ctx.clear(CGRect(x: 0, y: 0, width: width, height: height))
         draw(in: ctx, rect: fitted, color: iconBlue, background: nil)
         return ctx.makeImage()!
     }

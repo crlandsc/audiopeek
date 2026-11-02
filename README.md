@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="AudioPeek" src="audiopeek-logo.png" width="240">
+  <img alt="AudioPeek" src="audiopeek-logo.png" width="200">
 </p>
 
 # AudioPeek
