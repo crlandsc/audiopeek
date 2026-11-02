@@ -6,13 +6,15 @@ import XCTest
 final class PlaywaveMarkTests: XCTestCase {
     func testLockedIconMatchesTheCommittedArtwork() throws {
         let drawn = PlaywaveMark.iconImage(side: 400)
-        let leftBar = rgba(drawn, x: 115, y: 200)
-        let gap = rgba(drawn, x: 150, y: 200)
+        let leftCorner = rgba(drawn, x: 70, y: 200)
+        let centerBar = rgba(drawn, x: 200, y: 200)
+        let gap = rgba(drawn, x: 211, y: 200)
+        let rightCorner = rgba(drawn, x: 330, y: 200)
         let outside = rgba(drawn, x: 40, y: 200)
-        let tip = rgba(drawn, x: 285, y: 200)
 
-        XCTAssertTrue(isBlue(leftBar), "left bar \(leftBar)")
-        XCTAssertTrue(isBlue(tip), "tip \(tip)")
+        XCTAssertTrue(isBlue(leftCorner), "left corner \(leftCorner)")
+        XCTAssertTrue(isBlue(centerBar), "center bar \(centerBar)")
+        XCTAssertTrue(isBlue(rightCorner), "right corner \(rightCorner)")
         XCTAssertTrue(isBackground(gap), "gap \(gap)")
         XCTAssertTrue(isBackground(outside), "outside \(outside)")
         XCTAssertEqual(PlaywaveMark.menuBarImage().size, NSSize(width: 18, height: 18))
