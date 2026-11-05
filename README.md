@@ -110,17 +110,28 @@ Each new version is treated by macOS as a new app, so you'll need to repeat two 
 
 ## Build from source
 
-Most people should use the download in [Install](#install). This section is for developers.
-
-You need Apple's free Command Line Tools 26 or newer (macOS 15.6 or later; `xcode-select --install`). Xcode is not needed. The app it builds runs on macOS 15 or later.
+Most people should use the download in [Install](#install). This section is for developers. Either way, the app runs on macOS 15 or later.
 
 ```bash
 git clone https://github.com/crlandsc/audiopeek.git
 cd audiopeek
+```
+
+#### With Xcode
+
+Open `AudioPeek.xcodeproj` in Xcode 26 or newer and run the AudioPeek scheme.
+
+#### Without Xcode
+
+You only need Apple's free Command Line Tools 26 or newer (macOS 15.6 or later; `xcode-select --install`). Then run:
+
+```bash
 Scripts/build-app.sh
 ```
 
-Drag `build/AudioPeek.app` into Applications, replacing any other copy, then open it. A self-built copy is a new app to macOS, so it asks again for Finder access and for any protected folders your audio is in.
+Drag `build/AudioPeek.app` into Applications, replacing any other copy, then open it.
+
+A self-built copy is a new app to macOS, so it asks again for Finder access and for any protected folders your audio is in.
 
 
 ## License
