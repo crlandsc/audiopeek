@@ -46,6 +46,15 @@ func runningApps() -> [NSRunningApplication] {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
 }
 
+// Quitting can take a moment (the audio engine shuts down), so wait for it instead of sleeping.
+func waitForQuit(timeout: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline && !runningApps().isEmpty {
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return runningApps().isEmpty
+}
+
 func stopRunningApps() {
     for app in runningApps() { app.terminate() }
     let deadline = Date().addingTimeInterval(4)
@@ -190,9 +199,10 @@ defer {
 func generation() -> Int { readState(at: stateURL)?["generation"]?.int ?? 0 }
 
 func command(_ name: String, extra: [String: Any] = [:]) -> JSONValue {
-    let before = generation()
-    post(name, extra: extra)
-    return waitUntil(at: stateURL) { ($0["generation"]?.int ?? 0) > before } ?? JSONValue(raw: [:])
+    // Timers also write state, so wait for this command's own id, not just the next write.
+    let id = UUID().uuidString
+    post(name, extra: extra.merging(["commandID": id]) { current, _ in current })
+    return waitUntil(at: stateURL) { $0["lastCommandID"]?.string == id } ?? JSONValue(raw: [:])
 }
 
 func openFile(_ path: String) -> JSONValue {
@@ -273,8 +283,7 @@ state = waitUntil(at: stateURL, timeout: 4) { ($0["spectrogramLaneCount"]?.int ?
 Check.expect((state["spectrogramLaneCount"]?.int ?? 0) == 2, "dual draws the first 2 channels, got \(state["spectrogramLaneCount"]?.int ?? -1)")
 
 _ = command("quit")
-Thread.sleep(forTimeInterval: 0.3)
-Check.expect(runningApps().isEmpty, "app quit")
+Check.expect(waitForQuit(), "app quit")
 
 if Check.failures.isEmpty {
     print("SPECTROGRAM PASS")

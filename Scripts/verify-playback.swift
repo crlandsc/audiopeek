@@ -46,6 +46,15 @@ func runningApps() -> [NSRunningApplication] {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
 }
 
+// Quitting can take a moment (the audio engine shuts down), so wait for it instead of sleeping.
+func waitForQuit(timeout: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline && !runningApps().isEmpty {
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return runningApps().isEmpty
+}
+
 func stopRunningApps() {
     for app in runningApps() { app.terminate() }
     let deadline = Date().addingTimeInterval(4)
@@ -151,9 +160,10 @@ defer {
 func generation() -> Int { readState(at: stateURL)?["generation"]?.int ?? 0 }
 
 func command(_ name: String, extra: [String: Any] = [:]) -> JSONValue {
-    let before = generation()
-    post(name, extra: extra)
-    return waitUntil(at: stateURL) { ($0["generation"]?.int ?? 0) > before } ?? JSONValue(raw: [:])
+    // Timers also write state, so wait for this command's own id, not just the next write.
+    let id = UUID().uuidString
+    post(name, extra: extra.merging(["commandID": id]) { current, _ in current })
+    return waitUntil(at: stateURL) { $0["lastCommandID"]?.string == id } ?? JSONValue(raw: [:])
 }
 
 func openFile(_ path: String) -> JSONValue {
@@ -175,6 +185,11 @@ guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) 
     print("PLAYBACK FAIL")
     exit(1)
 }
+
+let launchedPid = readState(at: stateURL)?["pid"]?.int ?? -1
+let launchedPath = run("/bin/ps", ["-o", "comm=", "-p", String(launchedPid)]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let expectedPath = URL(fileURLWithPath: appPath).resolvingSymlinksInPath().appendingPathComponent("Contents/MacOS").path
+Check.expect(launchedPath.hasPrefix(expectedPath), "launched the app it was given: \(launchedPath)")
 
 var state = openFile(tone.path)
 Check.expect(state["slipVisible"]?.bool == true, "the file opens the panel")
@@ -232,8 +247,7 @@ Check.expect(volumeBefore == volumeDuring, "system volume unchanged during playb
 
 let firstPid = state["pid"]?.int
 _ = command("quit")
-Thread.sleep(forTimeInterval: 0.4)
-Check.expect(runningApps().isEmpty, "app quit before relaunch")
+Check.expect(waitForQuit(), "app quit before relaunch")
 let reopened = run("/usr/bin/open", [appPath, "--args", "--test-config", configURL.path])
 Check.expect(reopened.0 == 0, "relaunch")
 state = waitUntil(at: stateURL, timeout: 6) {
@@ -250,8 +264,7 @@ Check.expect(state["slipVisible"]?.bool == false, "a file that fails to open lea
 Check.expect(state["playbackRunning"]?.bool == false, "a failed open does not play")
 
 _ = command("quit")
-Thread.sleep(forTimeInterval: 0.3)
-Check.expect(runningApps().isEmpty, "app quit")
+Check.expect(waitForQuit(), "app quit")
 
 if Check.failures.isEmpty {
     print("PLAYBACK PASS")

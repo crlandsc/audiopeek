@@ -113,6 +113,9 @@ final class TestBridge: NSObject {
     let stateURL: URL
     var onOpenSettings: () -> Void = {}
     private var generation = 0
+    // The id of the last command handled. Timers also write state, so a script waits for its
+    // own id rather than for the next write.
+    private var lastCommandID: String?
     private var probePoint = NSPoint(x: 80, y: 10)
 
     init(
@@ -164,6 +167,7 @@ final class TestBridge: NSObject {
         }
         let state = TestState(
             generation: generation,
+            lastCommandID: lastCommandID,
             pid: Int(ProcessInfo.processInfo.processIdentifier),
             blob: store.blob,
             hotkeyDisplay: store.blob.hotkey.displayString,
@@ -186,6 +190,7 @@ final class TestBridge: NSObject {
             headerOrder: slip.headerOrder,
             finderPollScheduled: slip.pollScheduled,
             finderRequestCount: slip.requestCount,
+            finderReadCount: slip.readCount,
             playbackRunning: slip.playbackRunning,
             audioEngineRunning: slip.audioEngineRunning,
             escapeHotkeyRegistered: hotkey.escapeRegistered,
@@ -412,12 +417,14 @@ final class TestBridge: NSObject {
         case "setLoginEnabled":
             login.setEnabled(bool("enabled", in: userInfo) ?? false)
         case "quit":
+            lastCommandID = userInfo["commandID"] as? String
             writeState()
             NSApp.terminate(nil)
             return
         default:
             break
         }
+        lastCommandID = userInfo["commandID"] as? String
         writeState()
     }
 
@@ -459,6 +466,7 @@ final class TestBridge: NSObject {
 
 private struct TestState: Encodable {
     var generation: Int
+    var lastCommandID: String?
     var pid: Int
     var blob: SettingsBlob
     var hotkeyDisplay: String
@@ -481,6 +489,7 @@ private struct TestState: Encodable {
     var headerOrder: [String]
     var finderPollScheduled: Bool
     var finderRequestCount: Int
+    var finderReadCount: Int
     var playbackRunning: Bool
     var audioEngineRunning: Bool
     var escapeHotkeyRegistered: Bool
