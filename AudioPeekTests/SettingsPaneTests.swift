@@ -34,9 +34,23 @@ final class SettingsPaneTests: XCTestCase {
     }
 
     func testToolbarOffersTheThreePanesAndTheTitleFollowsTheSelection() {
+        // A Settings window another test hasn't freed yet must not be mistaken for this one.
+        let leftoverBox = DefaultsBox()
+        let leftover = SettingsWindowController(
+            store: SettingsStore(defaults: leftoverBox.defaults),
+            onLoginToggle: { _ in },
+            onOpenLoginItems: {},
+            onOpenAutomation: {},
+            onReset: {}
+        )
+        leftover.select(.general, animate: false)
+        defer {
+            leftover.window?.close()
+            leftoverBox.close()
+        }
         let (controller, _) = makeController()
         controller.select(.general, animate: false)
-        let window = NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }
+        let window = controller.window
         XCTAssertNotNil(window)
         XCTAssertEqual(window?.toolbarStyle, .preference)
         XCTAssertEqual(window?.toolbar?.items.map(\.label), ["General", "Waveform", "Spectrogram"])
@@ -67,7 +81,7 @@ final class SettingsPaneTests: XCTestCase {
         XCTAssertGreaterThan(heights[.general] ?? 0, 250)
         XCTAssertGreaterThan(heights[.spectrogram] ?? 0, heights[.waveform] ?? 0)
         XCTAssertLessThan(heights[.waveform] ?? 0, 520)
-        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+        controller.window?.close()
     }
 
     func testLabelsComeFromEveryPane() {
@@ -79,7 +93,7 @@ final class SettingsPaneTests: XCTestCase {
         let labels = controller.controlLabels()
         XCTAssertTrue(labels.contains("waveform.colorWell"), "Waveform pane missing from \(labels)")
         XCTAssertTrue(labels.contains("Linear"), "Waveform pane's amplitude control missing from \(labels)")
-        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+        controller.window?.close()
     }
 
     func testAFinderWarningOpensOnGeneral() {
@@ -92,7 +106,7 @@ final class SettingsPaneTests: XCTestCase {
         store.setFinderMessage("")
         settle()
         XCTAssertLessThan(controller.frame.height, before, "the window shrinks when the warning goes away")
-        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+        controller.window?.close()
     }
 
     func testEveryTabHasACollapsedAdvancedSectionThatGrowsTheWindow() {
@@ -113,7 +127,7 @@ final class SettingsPaneTests: XCTestCase {
             settle()
             XCTAssertEqual(controller.frame.height, collapsed, accuracy: 1, "\(pane) Advanced closes")
         }
-        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+        controller.window?.close()
     }
 
     func testEachTabResetsOnlyItsOwnSettings() {
@@ -151,6 +165,6 @@ final class SettingsPaneTests: XCTestCase {
         controller.select(.waveform, animate: false)
         controller.select(.spectrogram, animate: false)
         XCTAssertEqual(store.blob.spectrogram.nFFT, 1024)
-        NSApp.windows.first { $0.toolbar?.identifier == "AudioPeekSettings" }?.close()
+        controller.window?.close()
     }
 }

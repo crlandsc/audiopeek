@@ -76,6 +76,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var appliedPreviewSpace = false
     private var injectedFrontBundleID: String?
     private(set) var requestCount = 0
+    /// Finder replies that have come back, stale ones included. Equal to `requestCount` when none is in flight.
+    private(set) var readCount = 0
     private(set) var lastLoad = LoadSample(thermal: .nominal, cpuBusy: nil)
     var onActivity: () -> Void = {}
     var onFileOpened: () -> Void = {}
@@ -501,6 +503,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         let token = epoch
         finder.requestSelection { [weak self] read in
             guard let self else { return }
+            defer {
+                self.readCount += 1
+                self.onActivity()
+            }
             guard token == self.epoch else { return }
             self.inFlight = false
             self.apply(read)

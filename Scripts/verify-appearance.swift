@@ -169,9 +169,10 @@ defer {
 func generation() -> Int { readState(at: stateURL)?["generation"]?.int ?? 0 }
 
 func command(_ name: String, extra: [String: Any] = [:]) -> JSONValue {
-    let before = generation()
-    post(name, extra: extra)
-    return waitUntil(at: stateURL) { ($0["generation"]?.int ?? 0) > before } ?? JSONValue(raw: [:])
+    // Timers also write state, so wait for this command's own id, not just the next write.
+    let id = UUID().uuidString
+    post(name, extra: extra.merging(["commandID": id]) { current, _ in current })
+    return waitUntil(at: stateURL) { $0["lastCommandID"]?.string == id } ?? JSONValue(raw: [:])
 }
 
 func openFile(_ path: String) -> JSONValue {

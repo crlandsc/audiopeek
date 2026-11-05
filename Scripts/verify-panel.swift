@@ -52,6 +52,15 @@ func runningApps() -> [NSRunningApplication] {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
 }
 
+// Quitting can take a moment (the audio engine shuts down), so wait for it instead of sleeping.
+func waitForQuit(timeout: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline && !runningApps().isEmpty {
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return runningApps().isEmpty
+}
+
 func stopRunningApps() {
     for app in runningApps() { app.terminate() }
     let deadline = Date().addingTimeInterval(4)
@@ -209,9 +218,10 @@ Check.expect(state["panelCanBecomeKey"]?.bool == false, "panel does not become k
 func generation() -> Int { readState(at: stateURL)?["generation"]?.int ?? 0 }
 
 func command(_ name: String, extra: [String: Any] = [:], settle: Bool = false) -> JSONValue {
-    let before = generation()
+    // Timers also write state, so wait for this command's own id, not just the next write.
+    let id = UUID().uuidString
     let requests = readState(at: stateURL)?["finderRequestCount"]?.int ?? 0
-    post(name, extra: extra)
+    post(name, extra: extra.merging(["commandID": id]) { current, _ in current })
     if settle {
         let deadline = Date().addingTimeInterval(2)
         var latest = state
@@ -219,8 +229,9 @@ func command(_ name: String, extra: [String: Any] = [:], settle: Bool = false) -
             if let value = readState(at: stateURL) {
                 latest = value
                 let count = value["finderRequestCount"]?.int ?? 0
-                let gen = value["generation"]?.int ?? 0
-                if count > requests && gen > before + 1 {
+                let reads = value["finderReadCount"]?.int ?? 0
+                // Handled, asked Finder again, and every Finder read so far has come back and been applied.
+                if value["lastCommandID"]?.string == id && count > requests && reads == count {
                     return value
                 }
             }
@@ -228,7 +239,7 @@ func command(_ name: String, extra: [String: Any] = [:], settle: Bool = false) -
         }
         return readState(at: stateURL) ?? latest
     }
-    return waitForState(at: stateURL, above: before) ?? state
+    return waitUntil(at: stateURL, timeout: 4) { $0["lastCommandID"]?.string == id } ?? state
 }
 
 state = command("probeHotkey", extra: ["keyCode": 49, "modifiers": 2048])
@@ -428,8 +439,7 @@ Check.expect(state["settingsWindowVisible"]?.bool == true, "the denial is shown 
 Check.expect(state["finderPollScheduled"]?.bool == false, "a denial does not start the Finder timer")
 
 state = command("quit")
-Thread.sleep(forTimeInterval: 0.4)
-Check.expect(runningApps().isEmpty, "app quit")
+Check.expect(waitForQuit(), "app quit")
 
 if Check.failures.isEmpty {
     print("PANEL PASS")

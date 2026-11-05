@@ -37,7 +37,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
     private let onOpenLoginItems: () -> Void
     private let onOpenAutomation: () -> Void
     private let onReset: () -> Void
-    private var window: NSWindow?
+    private(set) var window: NSWindow?
     private var paneViews: [SettingsPane: NSHostingView<SettingsPaneView>] = [:]
     private var paneHeights: [SettingsPane: CGFloat] = [:]
     private(set) var currentPane: SettingsPane = .general
