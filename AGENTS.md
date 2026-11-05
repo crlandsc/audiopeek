@@ -9,6 +9,7 @@ README.md is the user-facing description. This file is for working on the code.
 - Xcode project `AudioPeek.xcodeproj`, scheme `AudioPeek`, one app target plus `AudioPeekTests`. Swift, AppKit for the panel and drawing, SwiftUI for the Settings forms. Deployment target macOS 15. Apple silicon.
 - Build: `xcodebuild -scheme AudioPeek -configuration Debug -destination 'platform=macOS' -derivedDataPath build/dd build`
 - Unit tests: `xcodebuild test -scheme AudioPeek -destination 'platform=macOS' -derivedDataPath build/dd`
+- No Xcode: `Scripts/build-app.sh` builds `build/AudioPeek.app` with only the Command Line Tools. It mirrors the Xcode target by hand.
 - `build/` is gitignored; keep derived data, scratch output and disk images there.
 - Source folders are Xcode synchronized groups, so new files are picked up without editing `project.pbxproj`.
 
@@ -37,6 +38,7 @@ README.md is the user-facing description. This file is for working on the code.
 - **Volume.** The panel's slider is the only volume control. It never changes system volume and never goes above unity. Tests and agent runs use a process-local gain and must not write the saved slider or the system volume.
 - **No length or sample-rate limits.** Long files open and paint left to right. A thin progress bar appears only when the estimated fill time is over about 1 s.
 - **Appearance** follows the system live, light and dark. On macOS 26 and later the panel is Liquid Glass; on macOS 15 it is the same layout on a solid background.
+- **Two build paths.** `Scripts/build-app.sh` copies the Xcode target's settings by hand: Swift flags, `Info.plist` variables, deployment target, signing and resources. Change one, change the other. `Scripts/check-builds.sh` catches drift. New Swift files need nothing; the script finds them.
 
 ## DSP
 
@@ -49,7 +51,7 @@ README.md is the user-facing description. This file is for working on the code.
 ## Tests
 
 - **Unit tests** (`AudioPeekTests/`) cover the DSP, the overview pass, settings coding, layout, resize zones and playback logic. Run them all after any change.
-- **End-to-end checks** (`Scripts/verify-*.swift`) launch a real instance of the app and drive it through `TestBridge`, checking settings, the panel and hotkeys, playback and the machine-load gate, the waveform, the spectrogram and appearance. Run each as `swift Scripts/verify-<name>.swift <path to AudioPeek.app>`, against a Debug build. Compile `verify-spectrogram` with `swiftc -O` first; it is slow interpreted.
+- **End-to-end checks** (`Scripts/verify-*.swift`) launch a real instance of the app and drive it through `TestBridge`, checking settings, the panel and hotkeys, playback and the machine-load gate, the waveform, the spectrogram and appearance. Run each as `swift Scripts/verify-<name>.swift <path to AudioPeek.app>`, against any build (a Debug build day to day, `build/AudioPeek.app` from `Scripts/build-app.sh` in `check-builds`). Compile `verify-spectrogram` with `swiftc -O` first; it is slow interpreted.
   - They quit any running AudioPeek first, so warn the user before running them.
   - `TestBridge` only activates when the app is launched with `--test-config <json>`. That config gives the run its own UserDefaults suite and can inject Finder selections, machine load and login failures, so the checks never touch the user's settings.
 - **librosa check**: `verify-spectrogram` runs `Scripts/check_mel.py`, which compares the shipping mel columns to pinned librosa within about 1 dB, reading the audio as data. It needs a venv at `build/mel-check`: `python3 -m venv build/mel-check && build/mel-check/bin/pip install -r Scripts/mel-requirements.txt`. An import failure fails the check.
@@ -66,6 +68,7 @@ build/render-playwave AudioPeek/Assets.xcassets/AppIcon.appiconset audiopeek-log
 ## Releasing
 
 - Version: `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.pbxproj` (two build configurations each). Bump both.
+- Run `Scripts/check-builds.sh` and confirm every step passes.
 - Build the Release configuration, then make `build/AudioPeek.dmg` with `hdiutil create -volname AudioPeek -srcfolder <folder holding AudioPeek.app and an /Applications symlink> -format UDZO`. Check the mounted copy's version and `codesign -dv` (ad-hoc signature, bundle id `com.landschoot.audiopeek`).
 - Releases are ad-hoc signed, not notarized, and published by hand on GitHub Releases. No Developer ID, Sparkle or Homebrew.
 - Every new build is a new code identity. macOS asks for Finder Automation again and Gatekeeper's Open Anyway may return. The README's install and update sections explain this to users; keep them in sync with any change to that flow.

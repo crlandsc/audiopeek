@@ -191,6 +191,11 @@ guard var state = waitForState(at: stateURL, above: 0) else {
     exit(1)
 }
 
+let launchedPid = readState(at: stateURL)?["pid"]?.int ?? -1
+let launchedPath = run("/bin/ps", ["-o", "comm=", "-p", String(launchedPid)]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let expectedPath = URL(fileURLWithPath: appPath).resolvingSymlinksInPath().appendingPathComponent("Contents/MacOS").path
+Check.expect(launchedPath.hasPrefix(expectedPath), "launched the app it was given: \(launchedPath)")
+
 if state["hotkeyFactoryFellBack"]?.bool == true {
     print("FACTORY FALLBACK \(state["hotkeyDisplay"]?.string ?? "") status \(state["viewerHotkeyStatus"]?.int ?? -1)")
 }

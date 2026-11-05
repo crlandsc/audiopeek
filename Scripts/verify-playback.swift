@@ -176,6 +176,11 @@ guard waitUntil(at: stateURL, timeout: 6, { ($0["generation"]?.int ?? 0) > 0 }) 
     exit(1)
 }
 
+let launchedPid = readState(at: stateURL)?["pid"]?.int ?? -1
+let launchedPath = run("/bin/ps", ["-o", "comm=", "-p", String(launchedPid)]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let expectedPath = URL(fileURLWithPath: appPath).resolvingSymlinksInPath().appendingPathComponent("Contents/MacOS").path
+Check.expect(launchedPath.hasPrefix(expectedPath), "launched the app it was given: \(launchedPath)")
+
 var state = openFile(tone.path)
 Check.expect(state["slipVisible"]?.bool == true, "the file opens the panel")
 Check.expect(state["playbackRunning"]?.bool == true, "autoplay starts on a clear sample")
