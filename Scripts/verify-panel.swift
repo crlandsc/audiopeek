@@ -410,6 +410,41 @@ Check.expect(state["previewSpaceRegistered"]?.bool == false, "space is not taken
 Check.expect(state["finderPollScheduled"]?.bool == false, "escape unschedules the Finder timer")
 Check.expect(state["panelIsKey"]?.bool != true, "escape does not leave the panel key")
 
+// A file opened with AudioPeek (Open With, a drop, open -a) stays up while Finder keeps the
+// selection it had at the open, and the panel follows Finder again once that changes.
+func waitForFinderReads(after count: Int, reads: Int = 3) -> JSONValue {
+    waitUntil(at: stateURL, timeout: 4) {
+        let done = $0["finderReadCount"]?.int ?? 0
+        return done >= count + reads && done == $0["finderRequestCount"]?.int
+    } ?? state
+}
+
+state = command("setFinder", extra: ["mode": "paths", "paths": [wavB.path]])
+var readsBeforeOpen = state["finderReadCount"]?.int ?? 0
+state = command("open", extra: ["paths": [wavA.path]])
+state = waitForFinderReads(after: readsBeforeOpen)
+Check.expect(state["slipVisible"]?.bool == true, "an opened file stays up while Finder shows another file")
+Check.expect(state["slipFilename"]?.string == "tone.wav", "the opened file is not replaced by the Finder selection, got \(state["slipFilename"]?.string ?? "")")
+
+state = command("setFinder", extra: ["mode": "paths", "paths": []])
+state = waitUntil(at: stateURL, timeout: 2.5) { $0["slipVisible"]?.bool == false } ?? state
+Check.expect(state["slipVisible"]?.bool == false, "clearing the Finder selection after an open closes the panel")
+
+readsBeforeOpen = state["finderReadCount"]?.int ?? 0
+state = command("open", extra: ["paths": [wavA.path]])
+state = waitForFinderReads(after: readsBeforeOpen)
+Check.expect(state["slipVisible"]?.bool == true, "an opened file stays up while Finder has nothing selected")
+Check.expect(state["slipFilename"]?.string == "tone.wav", "the opened file stays with an empty Finder selection, got \(state["slipFilename"]?.string ?? "")")
+
+state = command("setFinder", extra: ["mode": "paths", "paths": [wavB.path]])
+state = waitUntil(at: stateURL, timeout: 2.5) { $0["slipFilename"]?.string == "other.wav" } ?? state
+Check.expect(state["slipFilename"]?.string == "other.wav", "after an open, the panel follows a new Finder selection")
+Check.expect(state["slipVisible"]?.bool == true, "following Finder after an open keeps the panel up")
+
+state = command("dispatchEscape")
+state = waitUntil(at: stateURL, timeout: 2) { $0["slipVisible"]?.bool == false } ?? state
+Check.expect(state["slipVisible"]?.bool == false, "escape closes the panel after an open")
+
 state = command("setHotkey", extra: ["keyCode": 40, "modifiers": 6144])
 Check.expect(state["hotkeyDisplay"]?.string == "Control-Option-K", "rebind display \(state["hotkeyDisplay"]?.string ?? "")")
 state = command("probeHotkey", extra: ["keyCode": 49, "modifiers": 2048])
