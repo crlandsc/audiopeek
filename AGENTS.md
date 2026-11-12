@@ -10,12 +10,13 @@ README.md is the user-facing description. This file is for working on the code.
 - Build: `xcodebuild -scheme AudioPeek -configuration Debug -destination 'platform=macOS' -derivedDataPath build/dd build`
 - Unit tests: `xcodebuild test -scheme AudioPeek -destination 'platform=macOS' -derivedDataPath build/dd`
 - No Xcode: `Scripts/build-app.sh` builds `build/AudioPeek.app` with only the Command Line Tools. It mirrors the Xcode target by hand.
+- One dependency: Sparkle (the updater), a Swift package pinned to an exact version in the Xcode project. `Scripts/fetch-sparkle.sh` downloads that version into `build/sparkle/` for `build-app.sh` and the release scripts, checked against a pinned SHA-256. A new Sparkle version means the package pin in Xcode, `Package.resolved`, and the checksum in `fetch-sparkle.sh`.
 - `build/` is gitignored; keep derived data, scratch output and disk images there.
 - Source folders are Xcode synchronized groups, so new files are picked up without editing `project.pbxproj`.
 
 ## Code map
 
-- `AudioPeek/App/`: `AppDelegate` (wiring, second launch opens Settings), `HotkeyCenter` (Carbon hotkeys: the viewer hotkey, Escape, and Space while the panel is up), `StatusItemController`, `LoginItemController` (`SMAppService`), `PlaywaveMark` (the eye logo, drawn in code), `TestBridge` (test hooks, see below).
+- `AudioPeek/App/`: `AppDelegate` (wiring, second launch opens Settings), `HotkeyCenter` (Carbon hotkeys: the viewer hotkey, Escape, and Space while the panel is up), `StatusItemController`, `LoginItemController` (`SMAppService`), `PlaywaveMark` (the eye logo, drawn in code, with an optional update dot), `UpdateController` (the updater: Sparkle in a normal launch, a recording fake under tests), `TestBridge` (test hooks, see below).
 - `AudioPeek/FinderBridge/`: asks Finder for its selection with a compiled Apple Event, and decides whether it is exactly one supported, local audio file.
 - `AudioPeek/Viewer/`:
   - `SlipPanelController`: the panel's lifecycle, Finder polling, playback, and starting and cancelling overview passes.
@@ -38,7 +39,9 @@ README.md is the user-facing description. This file is for working on the code.
 - **Volume.** The panel's slider is the only volume control. It never changes system volume and never goes above unity. Tests and agent runs use a process-local gain and must not write the saved slider or the system volume.
 - **No length or sample-rate limits.** Long files open and paint left to right. A thin progress bar appears only when the estimated fill time is over about 1 s.
 - **Appearance** follows the system live, light and dark. On macOS 26 and later the panel is Liquid Glass; on macOS 15 it is the same layout on a solid background.
-- **Two build paths.** `Scripts/build-app.sh` copies the Xcode target's settings by hand: Swift flags, `Info.plist` variables, deployment target, signing and resources. Change one, change the other. `Scripts/check-builds.sh` catches drift. New Swift files need nothing; the script finds them.
+- **Two build paths.** `Scripts/build-app.sh` copies the Xcode target's settings by hand: Swift flags, `Info.plist` variables, deployment target, signing, resources and the embedded Sparkle framework (headers stripped, only the framework re-signed, as Xcode does). Change one, change the other. `Scripts/check-builds.sh` catches drift, including byte-for-byte differences in the embedded frameworks and in the updater's `Info.plist` keys. New Swift files need nothing; the script finds them.
+- **Updates.** Sparkle starts only in a normal launch. Unit tests and `--test-config` runs get `RecordingUpdaterDriver`, so no test starts an updater or reaches the network. A scheduled check never opens a window: it sets the dot on the menu bar eye, the "Update to …" menu title and the line in Settings, and choosing any of them opens Sparkle's window. Automatic installs (off by default) wait until AudioPeek is idle (no panel, nothing playing, Settings closed) or quits. No Notification Center alerts.
+- **Locked in since 2.6.** The feed URL (`SUFeedURL`), the update public key (`SUPublicEDKey`), the release certificate (pinned in `Scripts/release-common.sh`) and the bundle id. Changing any of them strands installed copies or resets their Finder permission. Unit tests guard the feed URL and the key.
 
 ## DSP
 
@@ -71,12 +74,16 @@ build/render-playwave AudioPeek/Assets.xcassets/AppIcon.appiconset audiopeek-log
 
 ## Releasing
 
-- Version: `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.pbxproj` (two build configurations each). Bump both.
+- Releases are signed with a self-signed certificate ("AudioPeek Release Signing"), not notarized, and published by hand on GitHub Releases. No Developer ID or Homebrew. Both build paths stay ad-hoc signed so anyone can build from source; only `Scripts/release.sh` uses the certificate.
+- Two keys, both in Chris's login keychain and backed up in a password manager, never in the repo: the certificate, whose fixed identity keeps the Finder permission across updates, and Sparkle's EdDSA update key (keychain account `audiopeek`), which signs every update. `Scripts/make-release-keys.sh` made them; agents never handle the private halves.
+- Version: `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.pbxproj` (two build configurations each). Bump both and commit.
 - Run `Scripts/check-builds.sh` and confirm every step passes.
-- Build the Release configuration, then make `build/AudioPeek.dmg` with `hdiutil create -volname AudioPeek -srcfolder <folder holding AudioPeek.app and an /Applications symlink> -format UDZO`. Check the mounted copy's version and `codesign -dv` (ad-hoc signature, bundle id `com.landschoot.audiopeek`).
-- Releases are ad-hoc signed, not notarized, and published by hand on GitHub Releases. No Developer ID, Sparkle or Homebrew.
-- Every new build is a new code identity. macOS asks for Finder Automation again and Gatekeeper's Open Anyway may return. The README's install and update sections explain this to users; keep them in sync with any change to that flow.
+- Write the release notes to `build/release-notes-<version>.md`. They appear in the update window and on the GitHub release.
+- Before a release that changes anything about updating or signing, run `Scripts/rehearse-update.sh` and walk through the update it prints, with Chris at the keyboard.
+- Run `Scripts/release.sh`. It builds a clean Release, re-signs it inside out with the certificate, checks the identity, makes `build/release/AudioPeek.dmg`, writes `build/release/appcast.xml`, and verifies the appcast's signature against the key inside the built app. It prints the `gh release create` command; Chris runs it. Every release uploads both files: installed copies read `appcast.xml` from the latest release.
+- After publishing, check that the feed URL serves the new appcast and that an installed copy finds the update.
+- The README's install and update sections explain the flow to users; keep them in sync with any change to it.
 
 ## Not in scope
 
-Quick Look extensions (Apple's preview wins for audio types), taking over Finder's spacebar, Accessibility prompts, bundled decoders (and the formats only they would open: `.mkv`, `.webm`, `.wma`), zoom and scroll, an overview cache, named presets, an in-app light/dark switch, and refusing files for length or sample rate.
+Developer ID signing and notarization, Homebrew, delta updates and beta channels, Quick Look extensions (Apple's preview wins for audio types), taking over Finder's spacebar, Accessibility prompts, bundled decoders (and the formats only they would open: `.mkv`, `.webm`, `.wma`), zoom and scroll, an overview cache, named presets, an in-app light/dark switch, and refusing files for length or sample rate.

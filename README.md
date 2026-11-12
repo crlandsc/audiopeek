@@ -78,7 +78,7 @@ Not supported: `.mkv`, `.webm` and `.wma`, because macOS can't decode them witho
 
 Open Settings from the AudioPeek icon in the menu bar, or from the gear in the top right of the panel. Settings has three tabs:
 
-- **General**: change the **shortcut** from Option-Space to something else, turn **Open at login** on or off, show or hide the **menu bar icon** and the **Dock icon**, and choose whether to show the **waveform**, the **spectrogram**, or both (and how to split the space).
+- **General**: change the **shortcut** from Option-Space to something else, turn **Open at login** on or off, show or hide the **menu bar icon** and the **Dock icon**, choose how AudioPeek **updates** itself (see [Updating](#updating)), and choose whether to show the **waveform**, the **spectrogram**, or both (and how to split the space).
 - **Waveform**: show every channel separately instead of one combined view (**dual view**), switch between linear and dB amplitude, and pick the waveform color.
 - **Spectrogram**: dual view, the spectrogram type (linear, log frequency, or mel), its colors, and optional **frequency** and **time axes**.
 
@@ -99,12 +99,22 @@ AudioPeek turns on **Open at login** the first time it opens a file, so the shor
 
 ## Updating
 
-To update, download the newest `AudioPeek.dmg` from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases), quit AudioPeek, and drag the new copy into Applications to replace the old one. Your settings are kept.
+From version 2.6, AudioPeek updates itself. Once a day it checks GitHub for a newer version. When there is one, a small dot appears on the menu bar icon and the menu reads **Update to** and the version number. Choose it to see what's new and install. AudioPeek relaunches as the new version, and your settings and Finder access carry over. You don't need Open Anyway again. You can also choose **Check for Updates…** from the menu bar icon at any time.
 
-Each new version is treated by macOS as a new app, so you'll need to repeat two quick steps:
+The **Updates** section of the General tab in Settings shows your version and has two switches:
+
+- **Check for updates automatically** (on to start with). Turn it off and AudioPeek only checks when you ask.
+- **Install updates automatically** (off to start with). Turn it on and AudioPeek downloads new versions in the background and installs them when you quit it, or after it has sat unused for a minute.
+
+Checking for updates is the only time AudioPeek connects to the internet. It asks GitHub whether a newer version exists and downloads it if you choose to update. Nothing about you or your files is sent.
+
+#### Coming from 2.5 or earlier
+Versions before 2.6 can't update themselves, so this one update is by hand. Download the newest `AudioPeek.dmg` from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases), quit AudioPeek, and drag the new copy into Applications to replace the old one. Your settings are kept. macOS treats it as a new app one last time, so repeat two quick steps:
 
 1. The **Open Anyway** step from [Install](#install).
 2. Turn **Finder** back on for AudioPeek under **System Settings** > **Privacy & Security** > **Automation**.
+
+Updates after that happen inside the app.
 
 
 ## Requirements
@@ -124,7 +134,7 @@ cd audiopeek
 
 #### With Xcode
 
-Open `AudioPeek.xcodeproj` in Xcode 26 or newer and run the AudioPeek scheme.
+Open `AudioPeek.xcodeproj` in Xcode 26 or newer and run the AudioPeek scheme. The first time, Xcode downloads [Sparkle](https://sparkle-project.org), the updater AudioPeek uses.
 
 #### Without Xcode
 
@@ -134,9 +144,9 @@ You only need Apple's free Command Line Tools 26 or newer (macOS 15.6 or later; 
 Scripts/build-app.sh
 ```
 
-Drag `build/AudioPeek.app` into Applications, replacing any other copy, then open it.
+The first build downloads [Sparkle](https://sparkle-project.org), the updater AudioPeek uses, from GitHub and checks it against a pinned checksum. Drag `build/AudioPeek.app` into Applications, replacing any other copy, then open it.
 
-A self-built copy is a new app to macOS, so it asks again for Finder access and for any protected folders your audio is in.
+A self-built copy is a new app to macOS, so it asks again for Finder access and for any protected folders your audio is in. It also checks for updates like a downloaded copy, and updating replaces it with the official release. Turn off **Check for updates automatically** in Settings to keep your own build.
 
 
 ## License
