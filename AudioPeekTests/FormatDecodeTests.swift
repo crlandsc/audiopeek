@@ -53,6 +53,42 @@ final class FormatDecodeTests: XCTestCase {
         try assertDecodes(url, sampleRate: 44_100, channels: 1, durationTolerance: 0.1)
     }
 
+    /// Files over 30 s use the coarse pass, which seeks before each column instead of reading
+    /// through. Ogg and ADTS have no packet table, so seeking there takes a different path
+    /// than in WAV or M4A. A short window per column forces a seek before every column.
+    func testCoarsePassSeeksAccuratelyThroughOggVorbisMovCafAndAac() throws {
+        let caf = try writeTone(extension: "caf", settings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+        ])
+        let aac = try writeTone(extension: "aac", settings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+        ])
+        for url in [try fixture("tone-vorbis", "ogg"), try fixture("tone-with-video", "mov"), caf, aac] {
+            let peaks = try coarsePeaks(of: url)
+            // Every window lands inside the steady tone, so a seek that lands wrong (or on
+            // silence) shows up as a column far below the 0.1 peak.
+            XCTAssertGreaterThan(peaks.min, 0.07, url.lastPathComponent)
+            XCTAssertLessThan(peaks.max, 0.14, url.lastPathComponent)
+        }
+    }
+
+    /// Opus needs about 80 ms of decoder pre-roll after a seek, and the coarse pass gives it
+    /// none, so the first part of each window comes out quiet. At the app's 2048-frame window
+    /// a 0.1 tone reads as low as 0.04. This was already true for `.opus` files before `.ogg`
+    /// was added. This pins today's behavior: once the reader pre-rolls Opus, it fails, and
+    /// Opus should move into the accurate-seek test above.
+    func testCoarsePassUnderreadsOpusAfterASeek() throws {
+        let peaks = try coarsePeaks(of: try fixture("tone-opus", "ogg"))
+        XCTAssertGreaterThan(peaks.min, 0, "the coarse pass reads Opus at all")
+        XCTAssertLessThan(peaks.min, 0.07, "Opus now reads accurately after a seek: move it into the accurate-seek test")
+    }
+
     /// The silent fixture that `verify-panel` opens and plays, so that check stays quiet.
     func testSilentOggFixtureIsSilent() throws {
         let url = try fixture("silence", "ogg")
@@ -82,6 +118,34 @@ final class FormatDecodeTests: XCTestCase {
         let peak = try peak(of: url, file: file, line: line)
         XCTAssertGreaterThan(peak, 0.07, url.lastPathComponent, file: file, line: line)
         XCTAssertLessThan(peak, 0.14, url.lastPathComponent, file: file, line: line)
+    }
+
+    /// Runs the coarse pass over 16 columns with a 256-frame window, which forces a seek
+    /// before every column, and returns the smallest and largest column peak, leaving out the
+    /// first and last columns.
+    private func coarsePeaks(of url: URL, file: StaticString = #filePath, line: UInt = #line) throws -> (min: Float, max: Float) {
+        let columns = 16
+        let result = WaveformReader.read(
+            url: url,
+            columnCount: columns,
+            dual: false,
+            chunkFrames: 4096,
+            proceed: { _ in true },
+            onChunk: { _ in },
+            inspectPerColumn: 256
+        )
+        XCTAssertEqual(result.stop, .finished, url.lastPathComponent, file: file, line: line)
+        let accumulator = try XCTUnwrap(result.accumulator, url.lastPathComponent, file: file, line: line)
+        XCTAssertEqual(accumulator.completedColumns, columns, url.lastPathComponent, file: file, line: line)
+        var low = Float.infinity
+        var high: Float = 0
+        for column in 1..<(columns - 1) {
+            let value = accumulator.column(lane: 0, column: column)
+            let peak = max(abs(value.minimum), abs(value.maximum))
+            low = min(low, peak)
+            high = max(high, peak)
+        }
+        return (low, high)
     }
 
     /// Reads the whole file through the waveform reader and returns the largest absolute sample.

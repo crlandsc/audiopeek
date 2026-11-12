@@ -69,7 +69,7 @@ AudioPeek plays anything your Mac already knows how to play:
 - Core Audio files (`.caf`)
 - QuickTime movies (`.mov`)
 
-For video files (`.mp4`, `.mov`), AudioPeek only shows and plays the audio. Ogg support was tested on macOS 27.2. If your version of macOS can't decode a file, the panel just doesn't open.
+For video files (`.mp4`, `.mov`), AudioPeek only shows and plays the audio, from the first audio track. Ogg support was tested on macOS 27.2. If your version of macOS can't decode a file, the panel closes again right after it opens.
 
 Not supported: `.mkv`, `.webm` and `.wma`, because macOS can't decode them without extra software that AudioPeek doesn't bundle, and `.oga`, which opens but reports no length. Long files work too (Tested on an M3 Max – AudioPeek reads about an hour of audio every 6 seconds, and it keeps playing the whole time).
 
