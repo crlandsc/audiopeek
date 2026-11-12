@@ -56,7 +56,9 @@ final class FormatDecodeTests: XCTestCase {
     /// Files over 30 s use the coarse pass, which seeks before each column instead of reading
     /// through. Ogg and ADTS have no packet table, so seeking there takes a different path
     /// than in WAV or M4A. A short window per column forces a seek before every column.
-    func testCoarsePassSeeksAccuratelyThroughOggVorbisMovCafAndAac() throws {
+    /// Opus seeks only past gaps longer than its 240 ms pre-roll, so on this 1 s fixture it
+    /// reads through at 16 columns and seeks before every column at 4.
+    func testCoarsePassSeeksAccuratelyThroughOggVorbisOpusMovCafAndAac() throws {
         let caf = try writeTone(extension: "caf", settings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 44_100,
@@ -69,24 +71,31 @@ final class FormatDecodeTests: XCTestCase {
             AVSampleRateKey: 44_100,
             AVNumberOfChannelsKey: 1,
         ])
-        for url in [try fixture("tone-vorbis", "ogg"), try fixture("tone-with-video", "mov"), caf, aac] {
-            let peaks = try coarsePeaks(of: url)
+        let opus = try fixture("tone-opus", "ogg")
+        let cases: [(url: URL, columns: Int)] = [
+            (try fixture("tone-vorbis", "ogg"), 16),
+            (try fixture("tone-with-video", "mov"), 16),
+            (caf, 16),
+            (aac, 16),
+            (opus, 16),
+            (opus, 4),
+        ]
+        for (url, columns) in cases {
+            let peaks = try coarsePeaks(of: url, columns: columns)
+            let label = "\(url.lastPathComponent), \(columns) columns"
             // Every window lands inside the steady tone, so a seek that lands wrong (or on
-            // silence) shows up as a column far below the 0.1 peak.
-            XCTAssertGreaterThan(peaks.min, 0.07, url.lastPathComponent)
-            XCTAssertLessThan(peaks.max, 0.14, url.lastPathComponent)
+            // silence, or before the decoder has settled) shows up as a column far below the
+            // 0.1 peak.
+            XCTAssertGreaterThan(peaks.min, 0.07, label)
+            XCTAssertLessThan(peaks.max, 0.14, label)
         }
     }
 
-    /// Opus needs about 80 ms of decoder pre-roll after a seek, and the coarse pass gives it
-    /// none, so the first part of each window comes out quiet. At the app's 2048-frame window
-    /// a 0.1 tone reads as low as 0.04. This was already true for `.opus` files before `.ogg`
-    /// was added. This pins today's behavior: once the reader pre-rolls Opus, it fails, and
-    /// Opus should move into the accurate-seek test above.
-    func testCoarsePassUnderreadsOpusAfterASeek() throws {
-        let peaks = try coarsePeaks(of: try fixture("tone-opus", "ogg"))
-        XCTAssertGreaterThan(peaks.min, 0, "the coarse pass reads Opus at all")
-        XCTAssertLessThan(peaks.min, 0.07, "Opus now reads accurately after a seek: move it into the accurate-seek test")
+    func testOnlyOpusPrerollsAfterASeek() {
+        XCTAssertEqual(WaveformReader.seekPreroll(formatID: kAudioFormatOpus, sampleRate: 48_000), 11_520)
+        for format in [kAudioFormatLinearPCM, kAudioFormatMPEG4AAC, kAudioFormatMPEGLayer3, kAudioFormatAppleLossless, kAudioFormatFLAC] {
+            XCTAssertEqual(WaveformReader.seekPreroll(formatID: format, sampleRate: 48_000), 0)
+        }
     }
 
     /// The silent fixture that `verify-panel` opens and plays, so that check stays quiet.
@@ -120,11 +129,9 @@ final class FormatDecodeTests: XCTestCase {
         XCTAssertLessThan(peak, 0.14, url.lastPathComponent, file: file, line: line)
     }
 
-    /// Runs the coarse pass over 16 columns with a 256-frame window, which forces a seek
-    /// before every column, and returns the smallest and largest column peak, leaving out the
-    /// first and last columns.
-    private func coarsePeaks(of url: URL, file: StaticString = #filePath, line: UInt = #line) throws -> (min: Float, max: Float) {
-        let columns = 16
+    /// Runs the coarse pass with a 256-frame window per column and returns the smallest and
+    /// largest column peak, leaving out the first and last columns.
+    private func coarsePeaks(of url: URL, columns: Int, file: StaticString = #filePath, line: UInt = #line) throws -> (min: Float, max: Float) {
         let result = WaveformReader.read(
             url: url,
             columnCount: columns,

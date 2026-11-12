@@ -46,7 +46,7 @@ README.md is the user-facing description. This file is for working on the code.
 - One column per layout point of the pane width, not per device pixel. Waveform columns hold min and max. Spectrogram columns take the max over the hops that land in them. Columns no hop lands in repeat their neighbor.
 - Spectrogram: Accelerate FFT, power spectrogram, and a hand-built Slaney mel bank (not HTK). Types are linear, log frequency and mel. Factory settings: n_fft 2048, hop 512, Hann, 128 mels, fmin 0, fmax at Nyquist, dB on with floor -80 and range 80, magma colors.
 - Mixdown averages all channels. Dual view draws up to 8 waveform lanes and 2 spectrogram lanes, and the header says so (`16 ch · showing 8`).
-- Files over 30 s use a coarse pass unless Full detail is on: each column reads only up to one window of samples (`OverviewDetail.inspectFrames`), with the hop raised to match.
+- Files over 30 s use a coarse pass unless Full detail is on: each column reads only up to one window of samples (`OverviewDetail.inspectFrames`), with the hop raised to match. Core Audio's Opus decoder comes back from a seek quiet and needs about 240 ms to reach full level, so for Opus the reader seeks 240 ms early and throws that pre-roll away (`WaveformReader.seekPreroll`). It only seeks past gaps longer than the pre-roll, so the coarse pass never decodes more than a full read.
 
 ## Tests
 

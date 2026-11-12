@@ -176,6 +176,13 @@ struct WaveformReadResult {
 }
 
 enum WaveformReader {
+    /// Frames to decode and throw away before a window after a seek. Core Audio's Opus decoder
+    /// comes back from a seek quiet and takes about 240 ms to reach full level (80 ms still reads
+    /// a -20 dBFS tone 3.4 dB low). The other formats Core Audio decodes land exactly.
+    static func seekPreroll(formatID: AudioFormatID, sampleRate: Double) -> Int {
+        formatID == kAudioFormatOpus ? Int((0.24 * sampleRate).rounded()) : 0
+    }
+
     static func read(
         url: URL,
         columnCount: Int,
@@ -228,8 +235,30 @@ enum WaveformReader {
         if inspectPerColumn > 0 {
             let totalFrames = accumulator.totalFrames
             let columns = max(columnCount, 1)
+            // A seek costs its pre-roll in decoding, so only seek past gaps longer than that.
+            // Reading through is never slower than the full read.
+            let preroll = seekPreroll(formatID: description.formatID, sampleRate: description.sampleRate)
+            let seekGap = max(4 * inspectPerColumn, preroll)
             var fileFrame = 0
             var decoderFrame = 0
+            func discard(_ count: Int) -> Bool {
+                var remaining = count
+                while remaining > 0 {
+                    var list = AudioBufferList(
+                        mNumberBuffers: 1,
+                        mBuffers: AudioBuffer(
+                            mNumberChannels: UInt32(channels),
+                            mDataByteSize: UInt32(sampleCapacity * MemoryLayout<Float>.size),
+                            mData: data
+                        )
+                    )
+                    var frames = UInt32(min(remaining, Int(framesPerChunk)))
+                    let status = ExtAudioFileRead(audioFile, &frames, &list)
+                    if status != noErr || frames == 0 { return false }
+                    remaining -= Int(frames)
+                }
+                return true
+            }
             while fileFrame < totalFrames {
                 if chunks > 0, !proceed(.betweenChunks) {
                     return WaveformReadResult(stop: .cancelled, chunks: chunks, opened: true, accumulator: accumulator)
@@ -238,28 +267,14 @@ enum WaveformReader {
                 let take = min(inspectPerColumn, max(0, columnEnd - fileFrame))
                 if take > 0 {
                     let gap = fileFrame - decoderFrame
-                    if gap > 0, gap < 4 * inspectPerColumn {
-                        var remaining = gap
-                        while remaining > 0 {
-                            var list = AudioBufferList(
-                                mNumberBuffers: 1,
-                                mBuffers: AudioBuffer(
-                                    mNumberChannels: UInt32(channels),
-                                    mDataByteSize: UInt32(sampleCapacity * MemoryLayout<Float>.size),
-                                    mData: data
-                                )
-                            )
-                            var frames = UInt32(min(remaining, Int(framesPerChunk)))
-                            let status = ExtAudioFileRead(audioFile, &frames, &list)
-                            if status != noErr || frames == 0 {
-                                return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
-                            }
-                            remaining -= Int(frames)
+                    if gap > 0, gap < seekGap {
+                        if !discard(gap) {
+                            return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
                         }
                         decoderFrame = fileFrame
-                    } else if gap >= 4 * inspectPerColumn {
-                        var position = Int64(fileFrame)
-                        if ExtAudioFileSeek(audioFile, position) != noErr {
+                    } else if gap >= seekGap {
+                        let start = max(0, fileFrame - preroll)
+                        if ExtAudioFileSeek(audioFile, Int64(start)) != noErr || !discard(fileFrame - start) {
                             return WaveformReadResult(stop: .failed, chunks: chunks, opened: true, accumulator: accumulator)
                         }
                         decoderFrame = fileFrame
@@ -328,7 +343,7 @@ enum WaveformReader {
         return WaveformReadResult(stop: .finished, chunks: chunks, opened: true, accumulator: accumulator)
     }
 
-    private static func clientFormat(of audioFile: ExtAudioFileRef) -> (sampleRate: Double, channelCount: UInt32)? {
+    private static func clientFormat(of audioFile: ExtAudioFileRef) -> (sampleRate: Double, channelCount: UInt32, formatID: AudioFormatID)? {
         var fileFormat = AudioStreamBasicDescription()
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         guard ExtAudioFileGetProperty(audioFile, kExtAudioFileProperty_FileDataFormat, &size, &fileFormat) == noErr else {
@@ -351,7 +366,7 @@ enum WaveformReader {
         guard ExtAudioFileSetProperty(audioFile, kExtAudioFileProperty_ClientDataFormat, size, &client) == noErr else {
             return nil
         }
-        return (fileFormat.mSampleRate, channels)
+        return (fileFormat.mSampleRate, channels, fileFormat.mFormatID)
     }
 }
 
