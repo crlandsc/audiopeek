@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import XCTest
 @testable import AudioPeek
 
@@ -76,19 +77,44 @@ final class OpenedFileHoldTests: XCTestCase {
         XCTAssertTrue(runUntil { !slip.isVisible })
     }
 
-    func testFailedFinderReadKeepsTheOpenedFileAndStaysQuiet() throws {
+    func testDeniedFinderReadKeepsTheOpenedFileAndStopsAskingQuietly() throws {
         let opened = try wav("opened")
-        let finder = StubFinder(.failed(-1743))
+        let finder = StubFinder(.failed(Int32(errAEEventNotPermitted)))
         var settingsOpened = 0
         let slip = makeSlip(finder, onOpenSettings: { settingsOpened += 1 })
         slip.openFiles([opened])
         XCTAssertTrue(waitForReads(slip, count: 1))
+        // Once the poll is stopped, no further read can arrive to change anything.
         XCTAssertTrue(runUntil { !slip.pollScheduled })
-        CFRunLoopRunInMode(.defaultMode, 0.6, false)
         XCTAssertTrue(slip.isVisible)
         XCTAssertEqual(slip.filename, opened.lastPathComponent)
         XCTAssertEqual(settingsOpened, 0)
         XCTAssertEqual(slipStore?.finderMessage, "")
+        slip.hide()
+    }
+
+    func testOtherFailedFinderReadsKeepTheOpenedFileAndKeepPolling() throws {
+        let opened = try wav("opened")
+        let picked = try wav("picked")
+        let finder = StubFinder(.failed(-1712))
+        var settingsOpened = 0
+        let slip = makeSlip(finder, onOpenSettings: { settingsOpened += 1 })
+        slip.openFiles([opened])
+        XCTAssertTrue(waitForReads(slip, count: 3))
+        XCTAssertTrue(slip.pollScheduled)
+        XCTAssertTrue(slip.isVisible)
+        XCTAssertEqual(slip.filename, opened.lastPathComponent)
+        XCTAssertEqual(settingsOpened, 0)
+
+        // Finder recovers. Its first answer stands for the selection it had at the open,
+        // so the opened file stays, and the next change is followed.
+        let selected = try wav("selected")
+        finder.read = .files([selected])
+        XCTAssertTrue(waitForReads(slip, count: 3))
+        XCTAssertEqual(slip.filename, opened.lastPathComponent)
+        finder.read = .files([picked])
+        XCTAssertTrue(runUntil { slip.filename == picked.lastPathComponent })
+        XCTAssertTrue(slip.isVisible)
         slip.hide()
     }
 
@@ -114,10 +140,14 @@ final class OpenedFileHoldTests: XCTestCase {
         let first = try wav("first")
         let second = try wav("second")
         let selected = try wav("selected")
+        let picked = try wav("picked")
         let finder = StubFinder(.files([selected]))
         let slip = makeSlip(finder)
         slip.openFiles([first])
         XCTAssertTrue(waitForReads(slip, count: 2))
+        // Release the first hold, so only a fresh hold from the second open can keep it up.
+        finder.read = .files([picked])
+        XCTAssertTrue(runUntil { slip.filename == picked.lastPathComponent })
         slip.openFiles([second])
         XCTAssertTrue(waitForReads(slip, count: 3))
         XCTAssertTrue(slip.isVisible)
@@ -136,6 +166,8 @@ final class OpenedFileHoldTests: XCTestCase {
 
         slip.beginResizeInteraction()
         slip.openFiles([second])
+        // Polling continues during a drag. Those replies must not replace the deferred open.
+        XCTAssertTrue(waitForReads(slip, count: 2))
         slip.endResizeInteraction()
         XCTAssertEqual(slip.filename, second.lastPathComponent)
         XCTAssertTrue(waitForReads(slip, count: 3))

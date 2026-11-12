@@ -532,8 +532,13 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func apply(_ read: FinderRead) {
         if isResizeDrag {
+            // A file opened during the drag outranks the poll replies that keep arriving.
+            if case .openedFile = deferredDuringResize { return }
             deferredDuringResize = .finderRead(read)
             return
+        }
+        if case .files = read, !store.finderMessage.isEmpty {
+            store.setFinderMessage("")
         }
         if holdsOpenedFile(against: read) {
             return
@@ -545,9 +550,6 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
             onOpenSettings()
             onActivity()
         case .files(let urls):
-            if !store.finderMessage.isEmpty {
-                store.setFinderMessage("")
-            }
             switch SelectionDecisionMaker.decide(urls) {
             case .open(let url):
                 show(url)
@@ -566,9 +568,12 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private func holdsOpenedFile(against read: FinderRead) -> Bool {
         guard let hold = openedFileHold else { return false }
         if case .failed = read {
-            // Someone who opened a file did not ask to follow Finder, so a missing
-            // Automation grant is no reason to open Settings. Stop asking and keep the file.
-            stopPoll()
+            // Someone who opened a file did not ask to follow Finder, so a failed read
+            // never opens Settings here. Without the Automation grant, stop asking.
+            // Any other failure (a slow Finder, a timeout) keeps polling.
+            if read.isPermissionDenied {
+                stopPoll()
+            }
             return true
         }
         switch hold {
@@ -594,11 +599,8 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         openedFileHold = .awaitingBaseline
     }
 
+    /// Callers defer during a resize drag, so this always runs outside one.
     private func show(_ url: URL) {
-        if isResizeDrag {
-            deferredDuringResize = .finderRead(.files([url]))
-            return
-        }
         orderedOut = false
         let window = panel ?? makePanel()
         panel = window

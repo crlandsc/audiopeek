@@ -4,6 +4,11 @@ import Foundation
 enum FinderRead: Equatable {
     case files([URL])
     case failed(Int32)
+
+    /// AudioPeek is not allowed to control Finder (Privacy & Security > Automation).
+    var isPermissionDenied: Bool {
+        self == .failed(Int32(errAEEventNotPermitted))
+    }
 }
 
 protocol FinderSelectionSource: AnyObject {
