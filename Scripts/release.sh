@@ -3,7 +3,8 @@
 # build/release/appcast.xml. It publishes nothing; it prints the command that does.
 #
 # Before running: bump MARKETING_VERSION and CURRENT_PROJECT_VERSION in the Xcode project,
-# commit, run Scripts/check-builds.sh, and write the release notes to
+# commit, merge to main (the release tag points at the commit this runs on), run
+# Scripts/check-builds.sh, and write the release notes to
 # build/release-notes-<version>.md (Markdown; they go in the update window and on GitHub).
 # The two release keys must be in the login keychain (Scripts/make-release-keys.sh).
 #
@@ -66,6 +67,7 @@ ditto "$DD/Build/Products/Release/AudioPeek.app" "$APP"
 [ "$(plutil -extract CFBundleShortVersionString raw -o - "$APP/Contents/Info.plist")" = "$VERSION" ] &&
     [ "$(plutil -extract CFBundleVersion raw -o - "$APP/Contents/Info.plist")" = "$BUILD" ] ||
     release_die "The built app's version doesn't match the project."
+require_locked_in_settings "$APP"
 require_update_key "$TOOLS" "$APP"
 
 STEP="signing with the release certificate"
@@ -111,4 +113,5 @@ To publish, push the commit, then run:
   gh release create v$VERSION build/release/AudioPeek.dmg build/release/appcast.xml --target $FULL_COMMIT --title "AudioPeek $VERSION" --notes-file build/release-notes-$VERSION.md
 
 Both files must go up together: installed copies read appcast.xml from the latest release.
+Afterwards, install the published AudioPeek.dmg and run Scripts/check-published-release.sh.
 EOF

@@ -72,6 +72,7 @@ xcodebuild -project AudioPeek.xcodeproj -scheme AudioPeek -configuration Release
     -destination 'platform=macOS' -derivedDataPath "$WORK/dd" clean build > "$WORK/xcodebuild.log" 2>&1 ||
     release_die "The Xcode build failed. See build/rehearsal/xcodebuild.log."
 BUILT="$WORK/dd/Build/Products/Release/AudioPeek.app"
+require_locked_in_settings "$BUILT"
 require_update_key "$TOOLS" "$BUILT"
 
 echo "Signing three rehearsal builds. macOS may ask to let codesign use the certificate: enter your login password and choose Always Allow."

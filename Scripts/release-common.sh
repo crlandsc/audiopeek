@@ -14,6 +14,10 @@ RELEASE_CERT_SHA1="29670BFD70DBB74870CD13C2827DCC0C01E15B0A"
 # A different key, even a freshly made one that Info.plist was changed to match, would be
 # refused by every installed copy.
 RELEASE_UPDATE_PUBLIC_KEY="1qVGNGLC/hj4lJlz7goFg7OTv83k2mHLwROShhWmgwc="
+# The bundle id and the feed every installed copy since 2.6 reads. A different bundle id is
+# a different app to macOS and to Sparkle; a different feed strands installed copies.
+RELEASE_BUNDLE_ID="com.landschoot.audiopeek"
+RELEASE_FEED_URL="https://github.com/crlandsc/audiopeek/releases/latest/download/appcast.xml"
 # The keychain account Sparkle's tools keep the update key under.
 SPARKLE_ACCOUNT="audiopeek"
 RELEASE_KEYCHAIN="${RELEASE_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
@@ -29,6 +33,17 @@ require_release_certificate() {
     found="$(security find-certificate -a -c "$RELEASE_CERT_NAME" -Z "$RELEASE_KEYCHAIN" 2>/dev/null)" || found=""
     [[ $'\n'"$found"$'\n' == *$'\n'"SHA-1 hash: $RELEASE_CERT_SHA1"$'\n'* ]] ||
         release_die "The '$RELEASE_CERT_NAME' certificate ($RELEASE_CERT_SHA1) isn't in $RELEASE_KEYCHAIN. Restore it from your backup, or run Scripts/make-release-keys.sh on a new Mac."
+}
+
+# Fails unless a freshly built app has the pinned bundle id and feed URL.
+require_locked_in_settings() {
+    local app="$1" value
+    value="$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null)" || value=""
+    [ "$value" = "$RELEASE_BUNDLE_ID" ] ||
+        release_die "The app's bundle id is '$value', not $RELEASE_BUNDLE_ID. Installed copies wouldn't take it as an update."
+    value="$(plutil -extract SUFeedURL raw -o - "$app/Contents/Info.plist" 2>/dev/null)" || value=""
+    [ "$value" = "$RELEASE_FEED_URL" ] ||
+        release_die "The app's SUFeedURL is '$value', not the pinned feed. Copies of this release would look for updates in the wrong place."
 }
 
 # Fails unless Sparkle's update key in the keychain matches the public key in the app.

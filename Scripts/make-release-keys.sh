@@ -107,7 +107,9 @@ fi
 cat <<EOF
 
 == Back up both private keys now (once)
-Losing either key is recoverable; losing both means everyone downloads AudioPeek by hand again.
+Both backups matter. Without the certificate, the next update resets everyone's Finder
+permission. Without the update key, installed copies may refuse every later update, and
+everyone downloads AudioPeek by hand again.
 
 1. Certificate: open Keychain Access, choose the login keychain and My Certificates,
    right-click "$CERT_NAME", choose Export, save as a .p12 with a strong password.
