@@ -131,8 +131,9 @@ All three carry: $(codesign -d -r- "$WORK/build-1/$NAME.app" 2>&1 | sed -n 's/^d
    (the menu reads "Restart to Install $VERSION.3") and, within about a minute of sitting idle,
    install and relaunch by itself. Preview a file: no Finder prompt.
 
-Clean up afterwards:
-  rm -rf "/Applications/$NAME.app"
+Clean up afterwards (quit $NAME first; reset Finder access before deleting the app,
+since tccutil finds the app by its bundle id):
   tccutil reset AppleEvents $BUNDLE_ID
+  rm -rf "/Applications/$NAME.app"
   defaults delete $BUNDLE_ID
 EOF
