@@ -36,6 +36,19 @@ final class SlipWindow: NSPanel {
     }
 }
 
+/// What arrived during a resize drag, replayed when the drag ends. The last one wins.
+private enum DeferredDuringResize {
+    case finderRead(FinderRead)
+    case openedFile(URL)
+}
+
+/// A file opened with AudioPeek stays up while Finder still reports the selection it had
+/// at the open. The first Finder reply after the open becomes that baseline.
+private enum OpenedFileHold: Equatable {
+    case awaitingBaseline
+    case baseline(FinderRead)
+}
+
 @MainActor
 final class SlipPanelController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
@@ -65,7 +78,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     private var frameSave: DispatchWorkItem?
     private var isResizeDrag = false
     private var resizeNeedsOverview = false
-    private var deferredFinderRead: FinderRead?
+    private var deferredDuringResize: DeferredDuringResize?
+    /// Set while a file opened with AudioPeek (Open With, a drop, `open -a`) is up.
+    /// It keeps Finder's existing selection from replacing that file.
+    private var openedFileHold: OpenedFileHold?
     private(set) var panelsMade = 0
     private var epoch = 0
     private var inFlight = false
@@ -422,6 +438,7 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        openedFileHold = nil
         orderedOut = true
         openGeneration += 1
         epoch += 1
@@ -515,7 +532,10 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
 
     private func apply(_ read: FinderRead) {
         if isResizeDrag {
-            deferredFinderRead = read
+            deferredDuringResize = .finderRead(read)
+            return
+        }
+        if holdsOpenedFile(against: read) {
             return
         }
         switch read {
@@ -541,16 +561,42 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// True when `read` should be ignored because an opened file is up and Finder has not
+    /// moved off the selection it had at the open. Any other selection ends the hold.
+    private func holdsOpenedFile(against read: FinderRead) -> Bool {
+        guard let hold = openedFileHold else { return false }
+        if case .failed = read {
+            // Someone who opened a file did not ask to follow Finder, so a missing
+            // Automation grant is no reason to open Settings. Stop asking and keep the file.
+            stopPoll()
+            return true
+        }
+        switch hold {
+        case .awaitingBaseline:
+            openedFileHold = .baseline(read)
+            return true
+        case .baseline(let baseline):
+            if read == baseline { return true }
+            openedFileHold = nil
+            return false
+        }
+    }
+
     func openFiles(_ urls: [URL]) {
         guard case .open(let url) = SelectionDecisionMaker.decide(urls) else {
             return
         }
+        if isResizeDrag {
+            deferredDuringResize = .openedFile(url)
+            return
+        }
         show(url)
+        openedFileHold = .awaitingBaseline
     }
 
     private func show(_ url: URL) {
         if isResizeDrag {
-            deferredFinderRead = .files([url])
+            deferredDuringResize = .finderRead(.files([url]))
             return
         }
         orderedOut = false
@@ -907,16 +953,21 @@ final class SlipPanelController: NSObject, NSWindowDelegate {
         let widthChanged = abs(paneColumnCount() - activeColumns) > 4
         let needsPass = widthChanged || resizeNeedsOverview
         resizeNeedsOverview = false
-        let deferred = deferredFinderRead
-        deferredFinderRead = nil
+        let deferred = deferredDuringResize
+        deferredDuringResize = nil
         content.endResizeStretch()
         isResizeDrag = false
         if let panel {
             panel.hasShadow = true
             panel.invalidateShadow()
         }
-        if let deferred {
-            apply(deferred)
+        switch deferred {
+        case .finderRead(let read):
+            apply(read)
+        case .openedFile(let url):
+            openFiles([url])
+        case nil:
+            break
         }
         if needsPass {
             startOverviewNow()
