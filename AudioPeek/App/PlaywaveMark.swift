@@ -32,16 +32,34 @@ enum PlaywaveMark {
         )
     }
 
-    static func menuBarImage() -> NSImage {
+    /// The dot drawn at the top right of the menu bar eye while an update is waiting.
+    static let updateDotDiameter: CGFloat = 6
+
+    /// The menu bar eye, as a template image so it follows light and dark menu bars.
+    /// With `updateDot`, a small dot sits at the top right, cut clear of the eye.
+    static func menuBarImage(updateDot: Bool = false) -> NSImage {
         let side = menuBarPointSize
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
             let black = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
             draw(in: ctx, rect: menuBarContentRect(filling: rect), color: black, background: nil)
+            if updateDot {
+                let dot = CGRect(
+                    x: rect.maxX - updateDotDiameter,
+                    y: rect.maxY - updateDotDiameter,
+                    width: updateDotDiameter,
+                    height: updateDotDiameter
+                )
+                ctx.setBlendMode(.clear)
+                ctx.fillEllipse(in: dot.insetBy(dx: -1.5, dy: -1.5))
+                ctx.setBlendMode(.normal)
+                ctx.setFillColor(black)
+                ctx.fillEllipse(in: dot)
+            }
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "AudioPeek"
+        image.accessibilityDescription = updateDot ? "AudioPeek, update available" : "AudioPeek"
         return image
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @main
 @MainActor
@@ -14,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var registeredCombo: HotkeyCombo?
     private(set) var hotkeyFactoryFellBack = false
     private var testBridge: TestBridge?
+    private var updates: UpdateController!
+    private var appMenuUpdateItem: NSMenuItem?
+    private var appMenuUpdateWatch: AnyCancellable?
 
     static func main() {
         let app = NSApplication.shared
@@ -26,18 +30,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Self.isRunningTests {
             return
         }
-        installMainMenu()
         let config = TestLaunchConfig.load(from: CommandLine.arguments)
+        // Sparkle starts only in a normal launch. A --test-config run gets the fake.
+        updates = UpdateController.make(forTesting: config != nil)
+        installMainMenu()
         let defaults = config?.makeDefaults() ?? .standard
         store = SettingsStore(defaults: defaults)
         let registrar: LoginRegistrar = config?.injection.map { InjectedLoginRegistrar(mode: $0) }
             ?? SystemLoginRegistrar()
         login = LoginItemController(store: store, registrar: registrar)
-        statusItem = StatusItemController { [weak self] in
+        statusItem = StatusItemController(updates: updates) { [weak self] in
             self?.openSettings()
         }
         settingsWindow = SettingsWindowController(
             store: store,
+            updates: updates,
             onLoginToggle: { [weak self] enabled in
                 self?.login.setEnabled(enabled)
             },
@@ -75,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyCenter.onPreviewSpace = { [weak self] in
             self?.slip.previewSpace()
         }
+        updates.isIdle = { [weak self] in
+            guard let self, let slip = self.slip, let settingsWindow = self.settingsWindow else { return false }
+            return !slip.isVisible && !slip.playbackRunning && !settingsWindow.isVisible
+        }
         slip.onFileOpened = { [weak self] in
             self?.login.noteFirstSuccessfulAudioOpen()
         }
@@ -100,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 store: store,
                 login: login,
                 status: statusItem,
+                updates: updates,
                 settings: settingsWindow,
                 slip: slip,
                 hotkey: hotkeyCenter,
@@ -219,6 +231,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
+        let update = NSMenuItem(title: updates.menuTitle, action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        update.target = self
+        appMenu.addItem(update)
+        appMenuUpdateItem = update
+        appMenuUpdateWatch = updates.$pending.sink { [weak self] pending in
+            guard let self else { return }
+            self.appMenuUpdateItem?.title = self.updates.menuTitle(for: pending)
+        }
         appMenu.addItem(.separator())
         let settings = NSMenuItem(title: "AudioPeek Settings", action: #selector(showSettings(_:)), keyEquivalent: ",")
         settings.target = self
@@ -234,6 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettings(_ sender: Any?) {
         openSettings()
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        updates.act()
     }
 
     private static var isRunningTests: Bool {

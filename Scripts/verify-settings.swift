@@ -111,6 +111,22 @@ func post(_ command: String, extra: [String: Any] = [:]) {
     )
 }
 
+/// Posts a command with its own id and waits until the app reports handling that id.
+func send(_ command: String, extra: [String: Any] = [:], at url: URL, timeout: TimeInterval = 8) -> JSONValue? {
+    let id = UUID().uuidString
+    var info = extra
+    info["commandID"] = id
+    post(command, extra: info)
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if let state = readState(at: url), state["lastCommandID"]?.string == id {
+            return state
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return nil
+}
+
 func defaultsValue(_ suite: String, _ key: String) -> (Bool, String) {
     let result = run("/usr/bin/defaults", ["read", suite, key])
     return (result.0 == 0, result.1.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -307,7 +323,54 @@ let freshBlob = defaultsValue(fresh.suite, "settingsBlob")
 Check.expect(freshBlob.0 == false, "fresh blob not written yet")
 Check.expect(state["activationPolicy"]?.string == "accessory", "fresh activation accessory")
 Check.expect(state["statusItemVisible"]?.bool == true, "fresh status item visible")
-Check.expect(state["statusMenuTitles"]?.strings == ["AudioPeek Settings", "Quit"], "status menu \(state["statusMenuTitles"]?.strings ?? [])")
+let checkTitles = ["AudioPeek Settings", "Check for Updates…", "Quit"]
+Check.expect(state["statusMenuTitles"]?.strings == checkTitles, "status menu \(state["statusMenuTitles"]?.strings ?? [])")
+
+// The updater: a test run gets the recording fake (-1 would mean Sparkle started).
+let feed = run("/usr/libexec/PlistBuddy", ["-c", "Print :SUFeedURL", info.path])
+Check.expect(
+    feed.1.trimmingCharacters(in: .whitespacesAndNewlines) == "https://github.com/crlandsc/audiopeek/releases/latest/download/appcast.xml",
+    "feed URL \(feed.1)"
+)
+Check.expect(state["updateChecksRequested"]?.int == 0, "test run uses the updater fake, no checks yet")
+Check.expect(state["statusShowsUpdateDot"]?.bool == false, "no update dot at launch")
+Check.expect(state["updateAutomaticallyChecks"]?.bool == true, "automatic checks on by default")
+Check.expect(state["updateAutomaticallyInstalls"]?.bool == false, "automatic installs off by default")
+if let checked = send("chooseUpdateMenuItem", at: fresh.stateURL) {
+    Check.expect(checked["updateChecksRequested"]?.int == 1, "Check for Updates reaches the updater")
+} else {
+    Check.expect(false, "chooseUpdateMenuItem state")
+}
+if let found = send("reportUpdate", extra: ["state": "available", "version": "9.9"], at: fresh.stateURL) {
+    Check.expect(found["statusMenuTitles"]?.strings == ["AudioPeek Settings", "Update to 9.9…", "Quit"], "found update menu \(found["statusMenuTitles"]?.strings ?? [])")
+    Check.expect(found["statusShowsUpdateDot"]?.bool == true, "found update shows the dot")
+} else {
+    Check.expect(false, "reportUpdate available state")
+}
+if let chosen = send("chooseUpdateMenuItem", at: fresh.stateURL) {
+    Check.expect(chosen["updateChecksRequested"]?.int == 2, "Update to opens the update window")
+}
+if let ready = send("reportUpdate", extra: ["state": "ready", "version": "9.9"], at: fresh.stateURL) {
+    Check.expect(ready["statusMenuTitles"]?.strings == ["AudioPeek Settings", "Restart to Install 9.9", "Quit"], "ready update menu \(ready["statusMenuTitles"]?.strings ?? [])")
+}
+if let installed = send("chooseUpdateMenuItem", at: fresh.stateURL) {
+    Check.expect(installed["updateInstallsRequested"]?.int == 1, "Restart to Install installs")
+}
+if let cleared = send("reportUpdate", extra: ["state": "none"], at: fresh.stateURL) {
+    Check.expect(cleared["statusMenuTitles"]?.strings == checkTitles, "seen update clears the menu title")
+    Check.expect(cleared["statusShowsUpdateDot"]?.bool == false, "seen update clears the dot")
+}
+_ = send("setAutomaticUpdateInstalls", extra: ["enabled": true], at: fresh.stateURL)
+if let off = send("setAutomaticUpdateChecks", extra: ["enabled": false], at: fresh.stateURL) {
+    Check.expect(off["updateAutomaticallyChecks"]?.bool == false, "automatic checks turn off")
+    Check.expect(off["updateAutomaticallyInstalls"]?.bool == false, "turning checks off turns installs off")
+}
+if let blocked = send("setAutomaticUpdateInstalls", extra: ["enabled": true], at: fresh.stateURL) {
+    Check.expect(blocked["updateAutomaticallyInstalls"]?.bool == false, "installs stay off while checks are off")
+}
+if let restored = send("setAutomaticUpdateChecks", extra: ["enabled": true], at: fresh.stateURL) {
+    state = restored
+}
 Check.expect(state["settingsWindowVisible"]?.bool == false, "first launch does not open settings")
 let freshType = lsappinfoType()
 print("lsappinfo fresh:\n\(freshType)")

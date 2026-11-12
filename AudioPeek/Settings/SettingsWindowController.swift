@@ -33,6 +33,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
     static let resizeDuration: TimeInterval = 0.25
 
     private let store: SettingsStore
+    private let updates: UpdateController
     private let onLoginToggle: (Bool) -> Void
     private let onOpenLoginItems: () -> Void
     private let onOpenAutomation: () -> Void
@@ -52,12 +53,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
 
     init(
         store: SettingsStore,
+        updates: UpdateController,
         onLoginToggle: @escaping (Bool) -> Void,
         onOpenLoginItems: @escaping () -> Void,
         onOpenAutomation: @escaping () -> Void,
         onReset: @escaping () -> Void
     ) {
         self.store = store
+        self.updates = updates
         self.onLoginToggle = onLoginToggle
         self.onOpenLoginItems = onOpenLoginItems
         self.onOpenAutomation = onOpenAutomation
@@ -181,7 +184,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
             onReset: onReset
         )
         for pane in SettingsPane.allCases {
-            let view = NSHostingView(rootView: SettingsPaneView(pane: pane, store: store, sections: sections, actions: actions) { [weak self] height in
+            let view = NSHostingView(rootView: SettingsPaneView(pane: pane, store: store, updates: updates, sections: sections, actions: actions) { [weak self] height in
                 self?.paneHeightChanged(pane, to: height)
             })
             view.sizingOptions = []

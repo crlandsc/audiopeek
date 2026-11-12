@@ -217,6 +217,19 @@ if [ -d "$XCODE_APP" ] && [ -d "$SCRIPT_APP" ]; then
     else
         record "Signing differs or could not be read (see build/check/signing.diff and entitlements.diff)" FAIL
     fi
+    UPDATE_KEYS_DIFFER=""
+    for key in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate SUScheduledCheckInterval SUEnableSystemProfiling; do
+        xcode_value="$(plutil -extract "$key" raw -o - "$XCODE_APP/Contents/Info.plist" 2> /dev/null)" || xcode_value="(missing)"
+        script_value="$(plutil -extract "$key" raw -o - "$SCRIPT_APP/Contents/Info.plist" 2> /dev/null)" || script_value="(missing)"
+        if [ "$xcode_value" = "(missing)" ] || [ "$xcode_value" != "$script_value" ]; then
+            UPDATE_KEYS_DIFFER="$UPDATE_KEYS_DIFFER $key"
+        fi
+    done
+    if [ -z "$UPDATE_KEYS_DIFFER" ]; then
+        record "Same updater settings in Info.plist" PASS
+    else
+        record "Updater settings missing or different in Info.plist:$UPDATE_KEYS_DIFFER" FAIL
+    fi
     SPARKLE_PLIST="Contents/Frameworks/Sparkle.framework/Resources/Info.plist"
     XCODE_SPARKLE="$(plutil -extract CFBundleShortVersionString raw -o - "$XCODE_APP/$SPARKLE_PLIST" 2> /dev/null)"
     if compare_frameworks "$XCODE_APP" "$SCRIPT_APP"; then

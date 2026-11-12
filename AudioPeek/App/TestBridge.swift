@@ -105,6 +105,7 @@ final class TestBridge: NSObject {
     let store: SettingsStore
     let login: LoginItemController
     let status: StatusItemController
+    let updates: UpdateController
     let settings: SettingsWindowController
     let slip: SlipPanelController
     let hotkey: HotkeyCenter
@@ -122,6 +123,7 @@ final class TestBridge: NSObject {
         store: SettingsStore,
         login: LoginItemController,
         status: StatusItemController,
+        updates: UpdateController,
         settings: SettingsWindowController,
         slip: SlipPanelController,
         hotkey: HotkeyCenter,
@@ -132,6 +134,7 @@ final class TestBridge: NSObject {
         self.store = store
         self.login = login
         self.status = status
+        self.updates = updates
         self.settings = settings
         self.slip = slip
         self.hotkey = hotkey
@@ -176,6 +179,11 @@ final class TestBridge: NSObject {
             activationPolicy: policy,
             statusItemVisible: status.isVisible,
             statusMenuTitles: status.menuTitles,
+            statusShowsUpdateDot: status.showsUpdateDot,
+            updateChecksRequested: updates.recorder?.checkCount ?? -1,
+            updateInstallsRequested: updates.recorder?.installCount ?? -1,
+            updateAutomaticallyChecks: updates.automaticallyChecks,
+            updateAutomaticallyInstalls: updates.automaticallyInstalls,
             settingsWindowVisible: settings.isVisible,
             loginShowsRegistered: store.loginPresentation.showsRegistered,
             loginOffersLoginItems: store.loginPresentation.offersLoginItems,
@@ -274,6 +282,19 @@ final class TestBridge: NSObject {
             app.application(NSApp, open: paths.map { URL(fileURLWithPath: $0) })
         case "openSettings":
             onOpenSettings()
+        case "reportUpdate":
+            let version = userInfo["version"] as? String ?? ""
+            switch userInfo["state"] as? String {
+            case "available": updates.recorder?.report(.available(version: version))
+            case "ready": updates.recorder?.report(.readyToInstall(version: version))
+            default: updates.recorder?.report(nil)
+            }
+        case "chooseUpdateMenuItem":
+            status.chooseUpdateItem()
+        case "setAutomaticUpdateChecks":
+            updates.setAutomaticallyChecks(bool("enabled", in: userInfo) ?? true)
+        case "setAutomaticUpdateInstalls":
+            updates.setAutomaticallyInstalls(bool("enabled", in: userInfo) ?? false)
         case "setHover":
             if let x = number("x", in: userInfo), let y = number("y", in: userInfo) {
                 slip.setHoverOverride(NSPoint(x: x, y: y))
@@ -475,6 +496,12 @@ private struct TestState: Encodable {
     var activationPolicy: String
     var statusItemVisible: Bool
     var statusMenuTitles: [String]
+    var statusShowsUpdateDot: Bool
+    /// -1 when the updater is not the test fake.
+    var updateChecksRequested: Int
+    var updateInstallsRequested: Int
+    var updateAutomaticallyChecks: Bool
+    var updateAutomaticallyInstalls: Bool
     var settingsWindowVisible: Bool
     var loginShowsRegistered: Bool
     var loginOffersLoginItems: Bool
