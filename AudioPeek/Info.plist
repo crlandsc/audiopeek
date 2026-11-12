@@ -32,6 +32,18 @@
 	<string>Copyright (c) 2026 Christopher Landschoot</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/crlandsc/audiopeek/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>1qVGNGLC/hj4lJlz7goFg7OTv83k2mHLwROShhWmgwc=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

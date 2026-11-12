@@ -125,6 +125,7 @@ struct SettingsActions {
 struct SettingsPaneView: View {
     let pane: SettingsPane
     @ObservedObject var store: SettingsStore
+    let updates: UpdateController
     @ObservedObject var sections: SettingsSectionState
     let actions: SettingsActions
     var onHeight: (CGFloat) -> Void = { _ in }
@@ -133,7 +134,7 @@ struct SettingsPaneView: View {
         Group {
             switch pane {
             case .general:
-                GeneralPane(store: store, sections: sections, actions: actions)
+                GeneralPane(store: store, updates: updates, sections: sections, actions: actions)
             case .waveform:
                 WaveformPane(store: store, sections: sections)
             case .spectrogram:
@@ -168,6 +169,7 @@ private struct PaneHeightKey: PreferenceKey {
 
 private struct GeneralPane: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var updates: UpdateController
     @ObservedObject var sections: SettingsSectionState
     let actions: SettingsActions
 
@@ -203,6 +205,8 @@ private struct GeneralPane: View {
                     store.setHotkey(combo)
                 }
             }
+
+            UpdatesSection(updates: updates)
 
             Section {
                 Toggle("Show waveform", isOn: store.binding(\.showWaveform))
@@ -360,6 +364,51 @@ private struct SpectrogramPane: View {
             } header: {
                 AdvancedHeader(pane: .spectrogram, sections: sections)
             }
+        }
+    }
+}
+
+/// The version, the two automatic-update switches and, while an update waits, a line naming it.
+/// Sparkle stores both switches itself, so they are not part of `SettingsBlob`.
+private struct UpdatesSection: View {
+    @ObservedObject var updates: UpdateController
+
+    var body: some View {
+        Section {
+            HStack(alignment: .center, spacing: 12) {
+                Text(updates.settingsStatus)
+                    .accessibilityIdentifier("updates.status")
+                Spacer(minLength: 0)
+                if updates.pending == nil {
+                    Button(updates.settingsButtonTitle) { updates.act() }
+                        .disabled(!updates.canAct)
+                        .accessibilityIdentifier("updates.button")
+                } else {
+                    Button(updates.settingsButtonTitle) { updates.act() }
+                        .disabled(!updates.canAct)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.accentColor)
+                        .accessibilityIdentifier("updates.button")
+                }
+            }
+            Toggle("Check for updates automatically", isOn: Binding(
+                get: { updates.automaticallyChecks },
+                set: { updates.setAutomaticallyChecks($0) }
+            ))
+            .accessibilityIdentifier("updates.automaticChecks")
+            Toggle(isOn: Binding(
+                get: { updates.automaticallyInstalls },
+                set: { updates.setAutomaticallyInstalls($0) }
+            )) {
+                Text("Install updates automatically")
+                Text("Downloads in the background and installs when AudioPeek quits or sits unused.")
+            }
+            .disabled(!updates.automaticallyChecks)
+            .accessibilityIdentifier("updates.automaticInstalls")
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Checking asks GitHub once a day whether a newer AudioPeek exists. No usage data is sent.")
         }
     }
 }

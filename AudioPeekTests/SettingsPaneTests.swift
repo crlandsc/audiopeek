@@ -20,6 +20,7 @@ final class SettingsPaneTests: XCTestCase {
         let store = SettingsStore(defaults: box.defaults)
         let controller = SettingsWindowController(
             store: store,
+            updates: UpdateController(driver: RecordingUpdaterDriver()),
             onLoginToggle: { _ in },
             onOpenLoginItems: {},
             onOpenAutomation: {},
@@ -38,6 +39,7 @@ final class SettingsPaneTests: XCTestCase {
         let leftoverBox = DefaultsBox()
         let leftover = SettingsWindowController(
             store: SettingsStore(defaults: leftoverBox.defaults),
+            updates: UpdateController(driver: RecordingUpdaterDriver()),
             onLoginToggle: { _ in },
             onOpenLoginItems: {},
             onOpenAutomation: {},

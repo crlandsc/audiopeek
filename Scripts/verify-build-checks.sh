@@ -79,6 +79,46 @@ if compare_signing "$SCRATCH/baseline" "$SCRATCH/candidate"; then
 fi
 pass "unreadable signing settings fail closed"
 
+make_framework_app() {
+    local app="$1"
+    mkdir -p "$app/Contents/Frameworks/Fake.framework/Versions/B"
+    printf 'binary' > "$app/Contents/Frameworks/Fake.framework/Versions/B/Fake"
+    ln -s B "$app/Contents/Frameworks/Fake.framework/Versions/Current"
+    ln -s Versions/Current/Fake "$app/Contents/Frameworks/Fake.framework/Fake"
+}
+make_framework_app "$SCRATCH/xcode.app"
+make_framework_app "$SCRATCH/script.app"
+compare_frameworks "$SCRATCH/xcode.app" "$SCRATCH/script.app" || fail "identical frameworks rejected"
+pass "identical embedded frameworks match"
+
+printf 'changed' > "$SCRATCH/script.app/Contents/Frameworks/Fake.framework/Versions/B/Fake"
+if compare_frameworks "$SCRATCH/xcode.app" "$SCRATCH/script.app"; then
+    fail "changed framework file accepted"
+fi
+pass "a changed framework file fails"
+
+make_framework_app "$SCRATCH/headers.app"
+mkdir -p "$SCRATCH/headers.app/Contents/Frameworks/Fake.framework/Versions/B/Headers"
+printf 'header' > "$SCRATCH/headers.app/Contents/Frameworks/Fake.framework/Versions/B/Headers/Fake.h"
+if compare_frameworks "$SCRATCH/xcode.app" "$SCRATCH/headers.app"; then
+    fail "extra framework file accepted"
+fi
+pass "an extra framework file fails"
+
+rm -f "$SCRATCH/script.app/Contents/Frameworks/Fake.framework/Versions/Current"
+ln -s A "$SCRATCH/script.app/Contents/Frameworks/Fake.framework/Versions/Current"
+printf 'binary' > "$SCRATCH/script.app/Contents/Frameworks/Fake.framework/Versions/B/Fake"
+if compare_frameworks "$SCRATCH/xcode.app" "$SCRATCH/script.app"; then
+    fail "changed symlink target accepted"
+fi
+pass "a changed symlink target fails"
+
+mkdir -p "$SCRATCH/none.app/Contents"
+if compare_frameworks "$SCRATCH/xcode.app" "$SCRATCH/none.app" || compare_frameworks "$SCRATCH/none.app" "$SCRATCH/none.app"; then
+    fail "missing Frameworks folder accepted"
+fi
+pass "a missing Frameworks folder fails closed"
+
 ROOT="$SCRATCH/Audio Peek"
 BUILD_BINARY="$ROOT/build/Test.app/Contents/MacOS/AudioPeek"
 OTHER_BINARY="$ROOT/build-other/Test.app/Contents/MacOS/AudioPeek"

@@ -70,7 +70,7 @@ build_version() {
 
 signing_settings() {
     local app="$1" prefix="$2" details flags
-    codesign --verify --strict "$app" || return 1
+    codesign --verify --deep --strict "$app" || return 1
     details="$(codesign --display --verbose=4 "$app" 2>&1)" || return 1
     flags="$(printf '%s\n' "$details" | sed -n 's/^CodeDirectory .* flags=\([^ ]*\) .*/\1/p')"
     [ -n "$flags" ] || return 1
@@ -95,6 +95,30 @@ compare_signing() {
     diff -u "$CHECK/xcode-entitlements.plist" "$CHECK/script-entitlements.plist" > "$CHECK/entitlements.diff"
     entitlements_status=$?
     [ "$signing_status" -eq 0 ] && [ "$entitlements_status" -eq 0 ]
+}
+
+# Lists every file and link under Contents/Frameworks with its hash, so two builds that
+# embed the same Sparkle, stripped and signed the same way, give the same list.
+frameworks_manifest() {
+    local dir="$1/Contents/Frameworks" file
+    [ -d "$dir" ] || return 1
+    (
+        cd "$dir" || exit 1
+        find . \( -type f -o -type l \) | LC_ALL=C sort | while IFS= read -r file; do
+            if [ -L "$file" ]; then
+                printf '%s -> %s\n' "$file" "$(readlink "$file")"
+            else
+                printf '%s %s\n' "$file" "$(shasum -a 256 "$file" | awk '{print $1}')" || exit 1
+            fi
+        done
+    )
+}
+
+compare_frameworks() {
+    frameworks_manifest "$1" > "$CHECK/xcode-frameworks.txt" || return 1
+    frameworks_manifest "$2" > "$CHECK/script-frameworks.txt" || return 1
+    [ -s "$CHECK/xcode-frameworks.txt" ] || return 1
+    diff -u "$CHECK/xcode-frameworks.txt" "$CHECK/script-frameworks.txt" > "$CHECK/frameworks.diff"
 }
 
 # Allow verify-build-checks.sh to exercise these helpers without launching the app.
@@ -192,6 +216,26 @@ if [ -d "$XCODE_APP" ] && [ -d "$SCRIPT_APP" ]; then
         record "Same signing flags, identity and entitlements" PASS
     else
         record "Signing differs or could not be read (see build/check/signing.diff and entitlements.diff)" FAIL
+    fi
+    UPDATE_KEYS_DIFFER=""
+    for key in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate SUScheduledCheckInterval SUEnableSystemProfiling; do
+        xcode_value="$(plutil -extract "$key" raw -o - "$XCODE_APP/Contents/Info.plist" 2> /dev/null)" || xcode_value="(missing)"
+        script_value="$(plutil -extract "$key" raw -o - "$SCRIPT_APP/Contents/Info.plist" 2> /dev/null)" || script_value="(missing)"
+        if [ "$xcode_value" = "(missing)" ] || [ "$xcode_value" != "$script_value" ]; then
+            UPDATE_KEYS_DIFFER="$UPDATE_KEYS_DIFFER $key"
+        fi
+    done
+    if [ -z "$UPDATE_KEYS_DIFFER" ]; then
+        record "Same updater settings in Info.plist" PASS
+    else
+        record "Updater settings missing or different in Info.plist:$UPDATE_KEYS_DIFFER" FAIL
+    fi
+    SPARKLE_PLIST="Contents/Frameworks/Sparkle.framework/Resources/Info.plist"
+    XCODE_SPARKLE="$(plutil -extract CFBundleShortVersionString raw -o - "$XCODE_APP/$SPARKLE_PLIST" 2> /dev/null)"
+    if compare_frameworks "$XCODE_APP" "$SCRIPT_APP"; then
+        record "Same embedded frameworks, byte for byte (Sparkle $XCODE_SPARKLE)" PASS
+    else
+        record "Embedded frameworks differ or are missing (see build/check/frameworks.diff)" FAIL
     fi
 else
     record "App comparison skipped: a build failed" FAIL
