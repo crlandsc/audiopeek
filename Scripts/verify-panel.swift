@@ -164,12 +164,17 @@ try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: 
 let wavA = root.appendingPathComponent("tone.wav")
 let wavB = root.appendingPathComponent("other.wav")
 let text = root.appendingPathComponent("notes.txt")
+let wma = root.appendingPathComponent("song.wma")
+// A real, silent Ogg Vorbis file, so opening and playing it makes no sound.
 let ogg = root.appendingPathComponent("song.ogg")
+let oggFixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("../AudioPeekTests/Fixtures/silence.ogg").standardizedFileURL
 let folder = root.appendingPathComponent("Folder", isDirectory: true)
 writeWav(to: wavA)
 writeWav(to: wavB)
 try! Data("hello".utf8).write(to: text)
-try! Data("ogg".utf8).write(to: ogg)
+try! Data("wma".utf8).write(to: wma)
+try! FileManager.default.copyItem(at: oggFixture, to: ogg)
 try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: root) }
 
@@ -273,9 +278,20 @@ state = command("setFinder", extra: ["mode": "paths", "paths": [text.path]])
 state = command("dispatchViewerHotkey", settle: true)
 Check.expect(state["slipVisible"]?.bool == false, "a non-audio file leaves the panel closed")
 
+state = command("setFinder", extra: ["mode": "paths", "paths": [wma.path]])
+state = command("dispatchViewerHotkey", settle: true)
+Check.expect(state["slipVisible"]?.bool == false, "a wma file leaves the panel closed")
+
 state = command("setFinder", extra: ["mode": "paths", "paths": [ogg.path]])
 state = command("dispatchViewerHotkey", settle: true)
-Check.expect(state["slipVisible"]?.bool == false, "an ogg file leaves the panel closed")
+state = waitUntil(at: stateURL) { $0["slipVisible"]?.bool == true && $0["playbackRunning"]?.bool == true } ?? state
+Check.expect(state["slipVisible"]?.bool == true, "an ogg file opens the panel")
+Check.expect(state["slipFilename"]?.string == "song.ogg", "ogg filename \(state["slipFilename"]?.string ?? "")")
+Check.expect(state["playbackRunning"]?.bool == true, "an ogg file plays")
+let oggMetadata = state["slipMetadata"]?.string ?? ""
+Check.expect(oggMetadata.hasPrefix("Ogg · 44.1 kHz · 2 ch · ") && oggMetadata.hasSuffix(" / 0:03"), "ogg metadata \(oggMetadata)")
+state = command("dispatchViewerHotkey", settle: true)
+Check.expect(state["slipVisible"]?.bool == false, "the hotkey closes the ogg panel")
 
 state = command("setFinder", extra: ["mode": "paths", "paths": [folder.path]])
 state = command("dispatchViewerHotkey", settle: true)

@@ -15,10 +15,25 @@ final class SelectionDecisionTests: XCTestCase {
         XCTAssertEqual(SelectionDecisionMaker.decide(facts: [localFile(wav), localFile(wav)]), .dismiss)
         XCTAssertEqual(SelectionDecisionMaker.decide(facts: [localFile(wav), localFile(other)]), .dismiss)
         XCTAssertEqual(SelectionDecisionMaker.decide(facts: [localFile(other)]), .dismiss)
-        XCTAssertEqual(
-            SelectionDecisionMaker.decide(facts: [localFile(URL(fileURLWithPath: "/tmp/song.ogg"))]),
-            .dismiss
-        )
+    }
+
+    func testFormatsCoreAudioCannotReadDismiss() {
+        // .mkv, .webm and .wma need a bundled decoder. .oga opens but reports no length.
+        for name in ["a.mkv", "a.webm", "a.wma", "a.oga"] {
+            let url = URL(fileURLWithPath: "/tmp/\(name)")
+            XCTAssertEqual(SelectionDecisionMaker.decide(facts: [localFile(url)]), .dismiss, name)
+        }
+    }
+
+    func testHeaderLabelsForEverySupportedFormat() {
+        for ext in AudioFileKind.extensions {
+            let url = URL(fileURLWithPath: "/tmp/a.\(ext)")
+            XCTAssertFalse(AudioFileKind.metadataLabel(for: url).isEmpty, ext)
+        }
+        XCTAssertEqual(AudioFileKind.metadataLabel(for: URL(fileURLWithPath: "/tmp/a.ogg")), "Ogg")
+        XCTAssertEqual(AudioFileKind.metadataLabel(for: URL(fileURLWithPath: "/tmp/a.MOV")), "MOV")
+        XCTAssertEqual(AudioFileKind.metadataLabel(for: URL(fileURLWithPath: "/tmp/a.aac")), "AAC")
+        XCTAssertEqual(AudioFileKind.metadataLabel(for: URL(fileURLWithPath: "/tmp/a.caf")), "CAF")
     }
 
     func testDirectoryPackageAndRemoteDismiss() {
@@ -38,7 +53,10 @@ final class SelectionDecisionTests: XCTestCase {
     }
 
     func testSupportedExtensions() {
-        for name in ["a.wav", "a.aif", "a.aiff", "a.mp3", "a.m4a", "a.mp4", "a.flac", "a.opus"] {
+        for name in [
+            "a.wav", "a.aif", "a.aiff", "a.mp3", "a.m4a", "a.mp4", "a.flac", "a.opus",
+            "a.ogg", "a.mov", "a.aac", "a.caf", "a.OGG",
+        ] {
             let url = URL(fileURLWithPath: "/tmp/\(name)")
             XCTAssertEqual(SelectionDecisionMaker.decide(facts: [localFile(url)]), .open(url), name)
         }
