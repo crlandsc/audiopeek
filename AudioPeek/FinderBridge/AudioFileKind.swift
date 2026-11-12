@@ -1,7 +1,11 @@
 import Foundation
 
 enum AudioFileKind {
-    static let extensions: Set<String> = ["wav", "aif", "aiff", "mp3", "m4a", "mp4", "flac", "opus"]
+    /// Formats Core Audio decodes on its own. `.mkv`, `.webm` and `.wma` would need a bundled
+    /// decoder, and `.oga` opens but reports no length, so they stay out.
+    static let extensions: Set<String> = [
+        "wav", "aif", "aiff", "mp3", "m4a", "mp4", "flac", "opus", "ogg", "mov", "aac", "caf",
+    ]
 
     static func isSupportedExtension(_ url: URL) -> Bool {
         extensions.contains(url.pathExtension.lowercased())
@@ -23,6 +27,14 @@ enum AudioFileKind {
             return "FLAC"
         case "opus":
             return "Opus"
+        case "ogg":
+            return "Ogg"
+        case "mov":
+            return "MOV"
+        case "aac":
+            return "AAC"
+        case "caf":
+            return "CAF"
         default:
             return ""
         }
