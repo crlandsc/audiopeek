@@ -381,9 +381,11 @@ private struct UpdatesSection: View {
                 Spacer(minLength: 0)
                 if updates.pending == nil {
                     Button(updates.settingsButtonTitle) { updates.act() }
+                        .disabled(!updates.canAct)
                         .accessibilityIdentifier("updates.button")
                 } else {
                     Button(updates.settingsButtonTitle) { updates.act() }
+                        .disabled(!updates.canAct)
                         .buttonStyle(.borderedProminent)
                         .tint(.accentColor)
                         .accessibilityIdentifier("updates.button")

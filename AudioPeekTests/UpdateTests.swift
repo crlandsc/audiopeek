@@ -24,6 +24,8 @@ final class UpdateTests: XCTestCase {
         let key = try XCTUnwrap(info["SUPublicEDKey"] as? String, "SUPublicEDKey missing from Info.plist")
         XCTAssertEqual(Data(base64Encoded: key)?.count, 32, "An EdDSA public key is 32 bytes")
         XCTAssertNotEqual(key, Self.spikePublicKey, "Info.plist still has the throwaway spike key")
+        // Changing this makes every installed copy refuse the next update.
+        XCTAssertEqual(key, Self.releasePublicKey, "SUPublicEDKey changed")
     }
 
     func testChecksDailyByDefaultAndNeverInstallsUnasked() {
@@ -122,6 +124,51 @@ final class UpdateTests: XCTestCase {
         updates.setAutomaticallyInstalls(true)
         XCTAssertFalse(updates.automaticallyInstalls, "Installs can't turn on while checks are off")
         XCTAssertFalse(driver.automaticallyInstalls)
+        updates.setAutomaticallyChecks(true)
+        XCTAssertFalse(updates.automaticallyInstalls, "Turning checks back on doesn't bring installs back")
+        XCTAssertFalse(driver.automaticallyInstalls)
+    }
+
+    func testSwitchesFollowChangesMadeInSparklesWindow() {
+        let driver = RecordingUpdaterDriver()
+        let updates = UpdateController(driver: driver)
+        driver.automaticallyInstalls = true
+        driver.onSettingsChange()
+        XCTAssertTrue(updates.automaticallyInstalls)
+    }
+
+    func testTheUpdateItemGreysOutWhileTheUpdaterIsBusy() {
+        let (status, updates, driver) = makeStatusItem()
+        XCTAssertTrue(status.updateItemEnabled)
+        driver.canCheckForUpdates = false
+        driver.onSettingsChange()
+        XCTAssertFalse(updates.canAct)
+        XCTAssertFalse(status.updateItemEnabled)
+        status.chooseUpdateItem()
+        XCTAssertEqual(driver.checkCount, 0)
+        driver.report(.readyToInstall(version: "2.7"))
+        XCTAssertTrue(status.updateItemEnabled, "A downloaded update can always be installed")
+    }
+
+    // MARK: Idle installs
+
+    func testADownloadedUpdateWaitsForAFullMinuteOfIdle() {
+        var wait = IdleWait(delay: 60)
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        for second in stride(from: 0, to: 60, by: 5) {
+            XCTAssertFalse(wait.sample(idle: true, now: start + Double(second)), "installed after \(second) s")
+        }
+        XCTAssertTrue(wait.sample(idle: true, now: start + 60))
+    }
+
+    func testAnyUseStartsTheMinuteOver() {
+        var wait = IdleWait(delay: 60)
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        XCTAssertFalse(wait.sample(idle: true, now: start))
+        XCTAssertFalse(wait.sample(idle: false, now: start + 55))
+        XCTAssertFalse(wait.sample(idle: true, now: start + 60))
+        XCTAssertFalse(wait.sample(idle: true, now: start + 115))
+        XCTAssertTrue(wait.sample(idle: true, now: start + 120))
     }
 
     func testSettingsNamesTheVersionAndWhatTheButtonDoes() {
@@ -142,5 +189,6 @@ final class UpdateTests: XCTestCase {
         XCTAssertEqual(driver.installCount, 1)
     }
 
+    private static let releasePublicKey = "1qVGNGLC/hj4lJlz7goFg7OTv83k2mHLwROShhWmgwc="
     private static let spikePublicKey = "UsqGCXQNxd/XKqlTjZQR0ia0zwR6oSOBGEeQR3QodCI="
 }

@@ -32,6 +32,11 @@ protocol UpdaterDriver: AnyObject {
     /// Set by the app: true when nothing is on screen and nothing is playing, so a
     /// downloaded update can install and relaunch without interrupting anyone.
     var isIdle: () -> Bool { get set }
+    /// False while the updater is busy (a background download, say) and a check would do nothing.
+    var canCheckForUpdates: Bool { get }
+    /// Called when the switches or `canCheckForUpdates` change underneath the app, for example
+    /// from the checkbox in Sparkle's own update window.
+    var onSettingsChange: () -> Void { get set }
 }
 
 /// Owns the updater for the app: the menu item, the dot on the menu bar icon and the
@@ -41,15 +46,32 @@ final class UpdateController: ObservableObject {
     @Published private(set) var pending: PendingUpdate?
     @Published private(set) var automaticallyChecks: Bool
     @Published private(set) var automaticallyInstalls: Bool
+    @Published private(set) var canCheck: Bool
     private let driver: UpdaterDriver
 
     init(driver: UpdaterDriver) {
         self.driver = driver
         automaticallyChecks = driver.automaticallyChecks
-        automaticallyInstalls = driver.automaticallyInstalls
+        automaticallyInstalls = driver.automaticallyChecks && driver.automaticallyInstalls
+        canCheck = driver.canCheckForUpdates
         driver.onPendingChange = { [weak self] pending in
             self?.pending = pending
         }
+        driver.onSettingsChange = { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    private func refresh() {
+        automaticallyChecks = driver.automaticallyChecks
+        automaticallyInstalls = driver.automaticallyChecks && driver.automaticallyInstalls
+        canCheck = driver.canCheckForUpdates
+    }
+
+    /// Whether the menu item and the Settings button can do anything right now.
+    var canAct: Bool {
+        if case .readyToInstall = pending { return true }
+        return canCheck
     }
 
     /// The fake, when tests drive the app.
@@ -100,16 +122,20 @@ final class UpdateController: ObservableObject {
         }
     }
 
+    /// Turning checks off also turns automatic installs off, so turning checks back on
+    /// never quietly brings installs back.
     func setAutomaticallyChecks(_ on: Bool) {
+        if !on {
+            driver.automaticallyInstalls = false
+        }
         driver.automaticallyChecks = on
-        automaticallyChecks = driver.automaticallyChecks
-        automaticallyInstalls = driver.automaticallyInstalls
+        refresh()
     }
 
     func setAutomaticallyInstalls(_ on: Bool) {
         guard automaticallyChecks else { return }
         driver.automaticallyInstalls = on
-        automaticallyInstalls = driver.automaticallyInstalls
+        refresh()
     }
 
     /// The menu item and the Settings button.
@@ -122,22 +148,68 @@ final class UpdateController: ObservableObject {
     }
 }
 
+/// Decides when a downloaded update may install by itself: after the app has stayed idle
+/// for `delay`, judged from samples taken a few seconds apart. Any busy sample starts over.
+struct IdleWait {
+    let delay: TimeInterval
+    private(set) var since: Date?
+
+    init(delay: TimeInterval) {
+        self.delay = delay
+    }
+
+    /// Records one sample; true when the update should install now.
+    mutating func sample(idle: Bool, now: Date) -> Bool {
+        guard idle else {
+            since = nil
+            return false
+        }
+        let start = since ?? now
+        since = start
+        return now.timeIntervalSince(start) >= delay
+    }
+
+    mutating func reset() {
+        since = nil
+    }
+}
+
 /// Sparkle's standard updater, with its scheduled-update window replaced by the quiet
 /// indicator ("gentle reminders") and automatic installs held until the app is idle.
 @MainActor
 final class SparkleUpdaterDriver: NSObject, UpdaterDriver {
-    /// How often to look for a moment to install a downloaded update.
-    static let idleCheckInterval: TimeInterval = 60
+    /// How long the app must stay idle before a downloaded update installs by itself.
+    static let idleInstallDelay: TimeInterval = 60
+    /// How often idleness is sampled while an update waits.
+    static let idleSampleInterval: TimeInterval = 5
 
     var onPendingChange: (PendingUpdate?) -> Void = { _ in }
+    var onSettingsChange: () -> Void = {}
     var isIdle: () -> Bool = { false }
     private var controller: SPUStandardUpdaterController!
     private var installHandler: (() -> Void)?
+    private var readyVersion: String?
     private var idleTimer: Timer?
+    private var idleWait = IdleWait(delay: SparkleUpdaterDriver.idleInstallDelay)
+    private var observations: [NSKeyValueObservation] = []
 
     override init() {
         super.init()
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
+        // Sparkle's update window has its own "automatically download and install" checkbox,
+        // and a background download blocks checks; follow both.
+        let changed: @Sendable () -> Void = { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.settingsChanged()
+                }
+            }
+        }
+        observations = [
+            updater.observe(\.automaticallyChecksForUpdates) { _, _ in changed() },
+            updater.observe(\.automaticallyDownloadsUpdates) { _, _ in changed() },
+            updater.observe(\.canCheckForUpdates) { _, _ in changed() },
+        ]
     }
 
     private var updater: SPUUpdater { controller.updater }
@@ -149,8 +221,13 @@ final class SparkleUpdaterDriver: NSObject, UpdaterDriver {
 
     var automaticallyInstalls: Bool {
         get { updater.automaticallyDownloadsUpdates }
-        set { updater.automaticallyDownloadsUpdates = newValue }
+        set {
+            updater.automaticallyDownloadsUpdates = newValue
+            settingsChanged()
+        }
     }
+
+    var canCheckForUpdates: Bool { updater.canCheckForUpdates }
 
     func checkForUpdates() {
         controller.checkForUpdates(nil)
@@ -164,16 +241,62 @@ final class SparkleUpdaterDriver: NSObject, UpdaterDriver {
         installHandler()
     }
 
+    private func settingsChanged() {
+        // Turned off with an update already downloaded: stop installing it by itself. It
+        // still installs if chosen from the menu, or when the app quits (Sparkle's rule).
+        if !updater.automaticallyDownloadsUpdates || !updater.automaticallyChecksForUpdates {
+            stopIdleWatch()
+        } else if installHandler != nil, idleTimer == nil {
+            startIdleWatch()
+        }
+        onSettingsChange()
+    }
+
+    /// The pending state as the user driver sees it, but a downloaded update stays offered
+    /// until it installs or fails.
+    private func report(_ pending: PendingUpdate?) {
+        if pending == nil, let readyVersion {
+            onPendingChange(.readyToInstall(version: readyVersion))
+        } else {
+            onPendingChange(pending)
+        }
+    }
+
     private func holdForIdleInstall(_ handler: @escaping () -> Void, version: String) {
         installHandler = handler
+        readyVersion = version
         onPendingChange(.readyToInstall(version: version))
-        idleTimer?.invalidate()
-        idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleCheckInterval, repeats: true) { [weak self] _ in
+        startIdleWatch()
+    }
+
+    private func startIdleWatch() {
+        stopIdleWatch()
+        idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleSampleInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let handler = self.installHandler, self.isIdle() else { return }
-                handler()
+                self?.sampleIdle()
             }
         }
+    }
+
+    private func stopIdleWatch() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+        idleWait.reset()
+    }
+
+    private func sampleIdle() {
+        guard let installHandler else { return }
+        if idleWait.sample(idle: isIdle(), now: Date()) {
+            stopIdleWatch()
+            installHandler()
+        }
+    }
+
+    private func installFailed() {
+        stopIdleWatch()
+        installHandler = nil
+        readyVersion = nil
+        onPendingChange(nil)
     }
 }
 
@@ -189,6 +312,13 @@ extension SparkleUpdaterDriver: SPUUpdaterDelegate {
             holdForIdleInstall(handler, version: version)
         }
         return true
+    }
+
+    // A failed download or install ends the cycle; clear what it left on screen.
+    nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
+        MainActor.assumeIsolated {
+            installFailed()
+        }
     }
 }
 
@@ -211,19 +341,19 @@ extension SparkleUpdaterDriver: SPUStandardUserDriverDelegate {
         guard !handleShowingUpdate else { return }
         let version = update.displayVersionString
         MainActor.assumeIsolated {
-            onPendingChange(.available(version: version))
+            report(.available(version: version))
         }
     }
 
     nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
         MainActor.assumeIsolated {
-            onPendingChange(nil)
+            report(nil)
         }
     }
 
     nonisolated func standardUserDriverWillFinishUpdateSession() {
         MainActor.assumeIsolated {
-            onPendingChange(nil)
+            report(nil)
         }
     }
 }
@@ -232,13 +362,11 @@ extension SparkleUpdaterDriver: SPUStandardUserDriverDelegate {
 /// test report an update.
 @MainActor
 final class RecordingUpdaterDriver: UpdaterDriver {
-    var automaticallyChecks = true {
-        didSet {
-            if !automaticallyChecks { automaticallyInstalls = false }
-        }
-    }
+    var automaticallyChecks = true
     var automaticallyInstalls = false
+    var canCheckForUpdates = true
     var onPendingChange: (PendingUpdate?) -> Void = { _ in }
+    var onSettingsChange: () -> Void = {}
     var isIdle: () -> Bool = { false }
     private(set) var checkCount = 0
     private(set) var installCount = 0

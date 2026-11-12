@@ -104,7 +104,7 @@ From version 2.6, AudioPeek updates itself. Once a day it checks GitHub for a ne
 The **Updates** section of the General tab in Settings shows your version and has two switches:
 
 - **Check for updates automatically** (on to start with). Turn it off and AudioPeek only checks when you ask.
-- **Install updates automatically** (off to start with). Turn it on and AudioPeek downloads new versions in the background and installs them when you quit it, or after it has sat unused for a minute.
+- **Install updates automatically** (off to start with). Turn it on and AudioPeek downloads new versions in the background and installs them when you quit it, or once it has sat unused for about a minute (no preview open, nothing playing, Settings closed).
 
 Checking for updates is the only time AudioPeek connects to the internet. It asks GitHub whether a newer version exists and downloads it if you choose to update. Nothing about you or your files is sent.
 

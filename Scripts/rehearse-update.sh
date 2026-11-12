@@ -59,7 +59,7 @@ STEP="preflight"
 require_release_certificate
 read_setting() {
     xcodebuild -project AudioPeek.xcodeproj -target AudioPeek -configuration Release -showBuildSettings 2>/dev/null |
-        awk -v key="$1" '$1 == key { print $3; exit }'
+        awk -v key="$1" '$1 == key && value == "" { value = $3 } END { print value }'
 }
 VERSION="$(read_setting MARKETING_VERSION)"
 BUILD="$(read_setting CURRENT_PROJECT_VERSION)"

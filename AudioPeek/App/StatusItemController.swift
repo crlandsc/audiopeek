@@ -2,7 +2,7 @@ import AppKit
 import Combine
 
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSMenuItemValidation {
     private var item: NSStatusItem?
     private var updateItem: NSMenuItem?
     private let updates: UpdateController
@@ -83,9 +83,22 @@ final class StatusItemController: NSObject {
         onSettings()
     }
 
+    /// False while the updater is busy, so the item is greyed out instead of doing nothing.
+    var updateItemEnabled: Bool {
+        guard let updateItem else { return false }
+        return validateMenuItem(updateItem)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates(_:)) {
+            return updates.canAct
+        }
+        return true
+    }
+
     /// Chooses the update item as a click would, for tests.
     func chooseUpdateItem() {
-        guard let updateItem else { return }
+        guard let updateItem, updateItemEnabled else { return }
         checkForUpdates(updateItem)
     }
 

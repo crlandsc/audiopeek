@@ -2,14 +2,18 @@
 # Shared by Scripts/release.sh and Scripts/rehearse-update.sh. Sourced, not run.
 #
 # The two release keys live in the login keychain (Scripts/make-release-keys.sh made them).
-# Their public halves are pinned here and in AudioPeek/Info.plist; a build signed with
-# anything else is refused.
+# Their public halves are pinned here (and the update key also in AudioPeek/Info.plist);
+# a build signed with anything else is refused.
 
 # SHA-1 of the "AudioPeek Release Signing" certificate. Every release carries it in its
 # designated requirement, which is what keeps the Finder permission across updates.
 # Changing it resets that permission for everyone.
 RELEASE_CERT_NAME="AudioPeek Release Signing"
 RELEASE_CERT_SHA1="29670BFD70DBB74870CD13C2827DCC0C01E15B0A"
+# Sparkle's EdDSA public key, the one every installed copy since 2.6 checks updates against.
+# A different key, even a freshly made one that Info.plist was changed to match, would be
+# refused by every installed copy.
+RELEASE_UPDATE_PUBLIC_KEY="1qVGNGLC/hj4lJlz7goFg7OTv83k2mHLwROShhWmgwc="
 # The keychain account Sparkle's tools keep the update key under.
 SPARKLE_ACCOUNT="audiopeek"
 RELEASE_KEYCHAIN="${RELEASE_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
@@ -21,8 +25,9 @@ release_die() {
 
 # Fails unless the keychain holds the pinned certificate.
 require_release_certificate() {
-    security find-certificate -a -c "$RELEASE_CERT_NAME" -Z "$RELEASE_KEYCHAIN" 2>/dev/null |
-        grep -q "^SHA-1 hash: $RELEASE_CERT_SHA1\$" ||
+    local found
+    found="$(security find-certificate -a -c "$RELEASE_CERT_NAME" -Z "$RELEASE_KEYCHAIN" 2>/dev/null)" || found=""
+    [[ $'\n'"$found"$'\n' == *$'\n'"SHA-1 hash: $RELEASE_CERT_SHA1"$'\n'* ]] ||
         release_die "The '$RELEASE_CERT_NAME' certificate ($RELEASE_CERT_SHA1) isn't in $RELEASE_KEYCHAIN. Restore it from your backup, or run Scripts/make-release-keys.sh on a new Mac."
 }
 
@@ -33,8 +38,10 @@ require_update_key() {
         release_die "$app has no SUPublicEDKey."
     keychain_key="$("$tools/bin/generate_keys" --account "$SPARKLE_ACCOUNT" -p 2>/dev/null)" ||
         release_die "No Sparkle update key (account '$SPARKLE_ACCOUNT') in the keychain. Restore it from your backup with generate_keys -f."
-    [ "$keychain_key" = "$app_key" ] ||
-        release_die "The update key in the keychain doesn't match SUPublicEDKey in the app. Updates signed with it would be refused."
+    [ "$app_key" = "$RELEASE_UPDATE_PUBLIC_KEY" ] ||
+        release_die "SUPublicEDKey in the app isn't the pinned update key. Installed copies would refuse updates signed for it."
+    [ "$keychain_key" = "$RELEASE_UPDATE_PUBLIC_KEY" ] ||
+        release_die "The update key in the keychain isn't the pinned one. Restore the backed-up key with generate_keys -f instead of making a new one."
 }
 
 # Re-signs an app with the release certificate, inside out: Sparkle's helpers, the
@@ -54,7 +61,7 @@ sign_with_release_certificate() {
 # Fails unless the app and every signed part inside it carry the release certificate,
 # and the app's designated requirement is its bundle id plus that certificate.
 check_release_identity() {
-    local app="$1" bundle_id requirement part leaf
+    local app="$1" bundle_id requirement part leaf part_requirement
     local fw="$app/Contents/Frameworks/Sparkle.framework"
     codesign --verify --deep --strict "$app" || release_die "$app fails a deep signature check."
     bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist")"
@@ -64,7 +71,8 @@ check_release_identity() {
         release_die "$app has the wrong identity: '$requirement'."
     for part in "$fw/Versions/B/XPCServices/Installer.xpc" "$fw/Versions/B/XPCServices/Downloader.xpc" \
         "$fw/Versions/B/Autoupdate" "$fw/Versions/B/Updater.app" "$fw"; do
-        codesign -dvv "$part" 2>&1 | grep -qx "Authority=$RELEASE_CERT_NAME" ||
+        part_requirement="$(codesign -d -r- "$part" 2>&1)" || part_requirement=""
+        [[ "$part_requirement" == *"certificate leaf = H\"$leaf\""* ]] ||
             release_die "$part isn't signed with the release certificate."
     done
 }

@@ -30,11 +30,22 @@ COMMIT="$(git rev-parse --short HEAD)"
 FULL_COMMIT="$(git rev-parse HEAD)"
 read_setting() {
     xcodebuild -project AudioPeek.xcodeproj -target AudioPeek -configuration Release -showBuildSettings 2>/dev/null |
-        awk -v key="$1" '$1 == key { print $3; exit }'
+        awk -v key="$1" '$1 == key && value == "" { value = $3 } END { print value }'
 }
 VERSION="$(read_setting MARKETING_VERSION)"
 BUILD="$(read_setting CURRENT_PROJECT_VERSION)"
 [ -n "$VERSION" ] && [ -n "$BUILD" ] || release_die "Couldn't read the version from the Xcode project."
+# Sparkle offers an update only when its build number (CFBundleVersion) is higher than the
+# installed one, so a release that forgets to bump it reaches nobody.
+[[ "$BUILD" =~ ^[0-9]+$ ]] || release_die "CURRENT_PROJECT_VERSION '$BUILD' isn't a whole number."
+LAST_TAG="$(git tag -l 'v*' --sort=-v:refname | awk -v skip="v$VERSION" '$0 != skip && !found { print; found = 1 }')"
+[ -n "$LAST_TAG" ] || release_die "No earlier release tag (v*) found. Run 'git fetch --tags' and try again."
+LAST_BUILD="$(git show "$LAST_TAG:AudioPeek.xcodeproj/project.pbxproj" |
+    awk -F' = |;' '/CURRENT_PROJECT_VERSION = / { value = $2 } END { print value }')"
+[[ "$LAST_BUILD" =~ ^[0-9]+$ ]] || release_die "Couldn't read the build number of $LAST_TAG."
+[ "$BUILD" -gt "$LAST_BUILD" ] ||
+    release_die "Build $BUILD isn't higher than $LAST_TAG's build $LAST_BUILD, so installed copies wouldn't see the update. Bump CURRENT_PROJECT_VERSION."
+echo "Previous release: $LAST_TAG (build $LAST_BUILD)."
 NOTES="$ROOT/build/release-notes-$VERSION.md"
 [ -s "$NOTES" ] || release_die "No release notes at build/release-notes-$VERSION.md."
 if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then

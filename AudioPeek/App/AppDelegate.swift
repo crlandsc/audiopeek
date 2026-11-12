@@ -3,7 +3,7 @@ import Combine
 
 @main
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var store: SettingsStore!
     private var statusItem: StatusItemController!
     private var login: LoginItemController!
@@ -258,6 +258,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func checkForUpdates(_ sender: Any?) {
         updates.act()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates(_:)) {
+            return updates.canAct
+        }
+        return true
     }
 
     private static var isRunningTests: Bool {

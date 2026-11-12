@@ -112,9 +112,11 @@ Losing either key is recoverable; losing both means everyone downloads AudioPeek
 1. Certificate: open Keychain Access, choose the login keychain and My Certificates,
    right-click "$CERT_NAME", choose Export, save as a .p12 with a strong password.
    Store the .p12 and its password in your password manager, then delete the file.
-2. Update key: run
-     "$GENERATE_KEYS" --account $SPARKLE_ACCOUNT -x ~/Desktop/audiopeek-update-key.txt
-   Store the file's contents in your password manager, then delete the file.
+2. Update key: run these three lines (a private folder, never the Desktop, which iCloud may sync):
+     folder="\$(mktemp -d)" && "$GENERATE_KEYS" --account $SPARKLE_ACCOUNT -x "\$folder/update-key.txt"
+     cat "\$folder/update-key.txt"
+     rm -rf "\$folder"
+   Store what cat prints in your password manager.
 
 == Give the agent these two public values (nothing else)
 Certificate SHA-1: $CERT_HASH
