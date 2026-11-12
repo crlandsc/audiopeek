@@ -5,6 +5,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A0000000000000000000001E /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000001D /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A0000000000000000000001A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -63,6 +67,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000000000000000000001E /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +118,9 @@
 				A00000000000000000000004 /* AudioPeek */,
 			);
 			name = AudioPeek;
+			packageProductDependencies = (
+				A0000000000000000000001D /* Sparkle */,
+			);
 			productName = AudioPeek;
 			productReference = A00000000000000000000006 /* AudioPeek.app */;
 			productType = "com.apple.product-type.application";
@@ -158,6 +166,9 @@
 			);
 			mainGroup = A00000000000000000000002;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A0000000000000000000001C /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A00000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -401,6 +412,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A0000000000000000000001C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A0000000000000000000001D /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0000000000000000000001C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }
