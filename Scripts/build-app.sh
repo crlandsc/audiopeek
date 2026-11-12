@@ -5,8 +5,8 @@
 # setting changes in Xcode, change it here too. Scripts/check-builds.sh catches drift.
 #
 # The one dependency, Sparkle (the updater), is read from the Xcode project's package
-# pin. The first build downloads that release from GitHub into build/sparkle/ and checks
-# it against the SHA-256 pinned below.
+# pin. Scripts/fetch-sparkle.sh downloads that release from GitHub into build/sparkle/
+# on the first build and checks it against a pinned SHA-256.
 #
 #   Scripts/build-app.sh                      build the app
 #   Scripts/build-app.sh --print-swift-flags  print the Swift flags and exit
@@ -58,16 +58,6 @@ die() {
 # 15.0 -> 15, 26.1 -> 26.1, so 15 and 15.0 compare equal.
 normalize_version() {
     echo "$1" | sed -E 's/(\.0)+$//'
-}
-
-# SHA-256 of Sparkle-for-Swift-Package-Manager.zip for each Sparkle version, the same
-# checksum Sparkle's Package.swift gives Swift Package Manager. A new Sparkle pin in
-# Xcode needs its line here.
-sparkle_sha256() {
-    case "$1" in
-        2.10.1) echo 4c2e48a3e50ebcc2c88a58a4c7264a1a99c3c31857ce754357afb9cdb323022a ;;
-        *) return 1 ;;
-    esac
 }
 
 STEP="checking this Mac"
@@ -154,8 +144,6 @@ SPARKLE_PACKAGE="$(pbx "objects.$ROOT_OBJECT.packageReferences.0")"
 [ "$(pbx "objects.$SPARKLE_PACKAGE.requirement.kind")" = "exactVersion" ] ||
     die "Sparkle must be pinned to an exact version in the Xcode project."
 SPARKLE_VERSION="$(pbx "objects.$SPARKLE_PACKAGE.requirement.version")"
-SPARKLE_SHA256="$(sparkle_sha256 "$SPARKLE_VERSION")" ||
-    die "No pinned checksum for Sparkle $SPARKLE_VERSION. Add it to sparkle_sha256 in Scripts/build-app.sh."
 [ "$(pbx "objects.$APP_TARGET.packageProductDependencies" || echo 0)" = "1" ] || die "The AudioPeek target's package products changed. $MIRROR_HINT"
 SPARKLE_PRODUCT="$(pbx "objects.$APP_TARGET.packageProductDependencies.0")"
 [ "$(pbx "objects.$SPARKLE_PRODUCT.productName")" = "Sparkle" ] &&
@@ -204,28 +192,8 @@ extra_files="$(cd "$SOURCE_DIR" && find . -type f ! -name '*.swift' ! -name '.DS
 [ -z "$extra_files" ] || die "New resource files in AudioPeek/ ($(echo "$extra_files" | tr '\n' ' ')). $MIRROR_HINT"
 
 STEP="getting Sparkle $SPARKLE_VERSION"
-SPARKLE_DIR="$ROOT/build/sparkle/$SPARKLE_VERSION"
-SPARKLE_ZIP="$SPARKLE_DIR/Sparkle-for-Swift-Package-Manager.zip"
-SPARKLE_UNPACKED="$SPARKLE_DIR/unpacked"
+SPARKLE_UNPACKED="$("$ROOT/Scripts/fetch-sparkle.sh" "$SPARKLE_VERSION")" || die "Couldn't get Sparkle $SPARKLE_VERSION."
 SPARKLE_FRAMEWORKS="$SPARKLE_UNPACKED/Sparkle.xcframework/macos-arm64_x86_64"
-if [ ! -f "$SPARKLE_ZIP" ]; then
-    echo "Downloading Sparkle $SPARKLE_VERSION (first build only)..."
-    mkdir -p "$SPARKLE_DIR"
-    curl -fsSL --retry 2 -o "$SPARKLE_ZIP.part" \
-        "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-for-Swift-Package-Manager.zip" ||
-        die "Couldn't download Sparkle $SPARKLE_VERSION from GitHub. Check the network and run this again."
-    mv "$SPARKLE_ZIP.part" "$SPARKLE_ZIP"
-fi
-if [ "$(shasum -a 256 "$SPARKLE_ZIP" | awk '{print $1}')" != "$SPARKLE_SHA256" ]; then
-    rm -f "$SPARKLE_ZIP"
-    rm -rf "$SPARKLE_UNPACKED"
-    die "The Sparkle $SPARKLE_VERSION download doesn't match its pinned checksum, so it was deleted. Run this again."
-fi
-if [ ! -d "$SPARKLE_FRAMEWORKS/Sparkle.framework" ]; then
-    rm -rf "$SPARKLE_UNPACKED" "$SPARKLE_UNPACKED.part"
-    ditto -x -k "$SPARKLE_ZIP" "$SPARKLE_UNPACKED.part"
-    mv "$SPARKLE_UNPACKED.part" "$SPARKLE_UNPACKED"
-fi
 [ -d "$SPARKLE_FRAMEWORKS/Sparkle.framework" ] || die "The Sparkle $SPARKLE_VERSION download has no macOS framework."
 
 STEP="compiling"
