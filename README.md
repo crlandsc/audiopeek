@@ -1,5 +1,9 @@
 <p align="center">
-  <img alt="AudioPeek" src="audiopeek-logo.png" width="200">
+  <a href="https://chrislandschoot.com/audiopeek/"><img alt="AudioPeek" src="audiopeek-logo.png" width="200"></a>
+</p>
+
+<p align="center">
+  <a href="https://chrislandschoot.com/audiopeek/"><b>chrislandschoot.com/audiopeek</b></a> · <a href="https://github.com/crlandsc/audiopeek/releases/latest">Latest release</a>
 </p>
 
 # AudioPeek
@@ -18,7 +22,7 @@ When previewing audio files on Mac, have you ever wished you could see more than
 
 ## Install
 
-Just like any other Mac application, download the disk image (`AudioPeek.dmg`) from [GitHub Releases](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications.
+Just like any other Mac application, download the disk image (`AudioPeek.dmg`) from [chrislandschoot.com/audiopeek](https://chrislandschoot.com/audiopeek/) or the [Releases page](https://github.com/crlandsc/audiopeek/releases). Open it and drag AudioPeek to Applications.
 
 #### IMPORTANT
 The first open is *blocked*. macOS shows:
